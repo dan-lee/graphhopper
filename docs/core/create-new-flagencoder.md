@@ -5,7 +5,7 @@ different desired name.
 
 Make sure that it supports the required speed resolution via calling the appropriate (super) constructor. 
 E.g. speedBits means how many bits should reserved for the speed information, 
-the speedFactor means by which factor the speed should be devided before storing 
+the speedFactor means by which factor the speed should be divided before storing 
 (e.g. 5 for car and 1 for bikes for more precision).
 
 As a third step you need to tune the speeds for the different road types and surfaces. Maybe
@@ -29,9 +29,10 @@ See Bike2WeightFlagEncoder for an example that uses different weights: slower sp
 ## Elevation
 
 To incorporate or precalculate values based on the elevation data you can hook into applyWayTags
-and call edge.fetchWayGeometry(3) or again, see Bike2WeightFlagEncoder.
+and call edge.fetchWayGeometry(FetchMode.ALL) or again, see Bike2WeightFlagEncoder.
 
 ## Add to the core
 
 If you want to include your FlagEncoder in GraphHopper and e.g. still want to use the config.yml
-you can use a subclass of DefaultFlagEncoderFactory and use the configuration object to change different properties.
+you can use a subclass of DefaultFlagEncoderFactory, set it to to the GraphHopper instance
+and use the configuration object to change different properties.

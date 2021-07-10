@@ -17,22 +17,12 @@
  */
 package com.graphhopper.routing.lm;
 
-import com.graphhopper.GHRequest;
-import com.graphhopper.GHResponse;
 import com.graphhopper.GraphHopperConfig;
-import com.graphhopper.routing.AlgorithmOptions;
-import com.graphhopper.routing.RoutingAlgorithm;
-import com.graphhopper.routing.RoutingAlgorithmFactory;
-import com.graphhopper.routing.RoutingAlgorithmFactorySimple;
+import com.graphhopper.config.LMProfile;
 import com.graphhopper.routing.ch.CHPreparationHandler;
-import com.graphhopper.routing.util.HintsMap;
-import com.graphhopper.routing.weighting.AbstractWeighting;
-import com.graphhopper.routing.weighting.Weighting;
-import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.GraphHopperStorage;
 import com.graphhopper.storage.StorableProperties;
 import com.graphhopper.storage.index.LocationIndex;
-import com.graphhopper.util.PMap;
 import com.graphhopper.util.Parameters;
 import com.graphhopper.util.Parameters.Landmark;
 import org.slf4j.Logger;
@@ -44,7 +34,8 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static com.graphhopper.util.Helper.*;
+import static com.graphhopper.util.Helper.createFormatter;
+import static com.graphhopper.util.Helper.getMemInfo;
 
 /**
  * This class deals with the A*, landmark and triangulation (ALT) preparations.
@@ -52,19 +43,16 @@ import static com.graphhopper.util.Helper.*;
  * @author Peter Karich
  */
 public class LMPreparationHandler {
-    private Logger LOGGER = LoggerFactory.getLogger(LMPreparationHandler.class);
+    private final Logger LOGGER = LoggerFactory.getLogger(LMPreparationHandler.class);
     private int landmarkCount = 16;
-    private int activeLandmarkCount = 8;
 
     private final List<PrepareLandmarks> preparations = new ArrayList<>();
-    // input weighting list from configuration file
-    // one such entry can result into multiple Weighting objects e.g. fastest & car,foot => fastest|car and fastest|foot
-    private final List<String> weightingsAsStrings = new ArrayList<>();
-    private final List<Weighting> weightings = new ArrayList<>();
+    // we first add the profiles and later read them to create the config objects (because they require
+    // the actual Weightings)
+    private final List<LMProfile> lmProfiles = new ArrayList<>();
+    private final List<LMConfig> lmConfigs = new ArrayList<>();
     private final Map<String, Double> maximumWeights = new HashMap<>();
-    private boolean enabled = false;
     private int minNodes = -1;
-    private boolean disablingAllowed = false;
     private final List<String> lmSuggestionsLocations = new ArrayList<>(5);
     private int preparationThreads;
     private ExecutorService threadPool;
@@ -75,52 +63,30 @@ public class LMPreparationHandler {
     }
 
     public void init(GraphHopperConfig ghConfig) {
+        // throw explicit error for deprecated configs
+        if (ghConfig.has("prepare.lm.weightings")) {
+            throw new IllegalStateException("Use profiles_lm instead of prepare.lm.weightings, see #1922 and docs/core/profiles.md");
+        }
+
         setPreparationThreads(ghConfig.getInt(Parameters.Landmark.PREPARE + "threads", getPreparationThreads()));
+        setLMProfiles(ghConfig.getLMProfiles());
 
         landmarkCount = ghConfig.getInt(Parameters.Landmark.COUNT, landmarkCount);
-        activeLandmarkCount = ghConfig.getInt(Landmark.ACTIVE_COUNT_DEFAULT, Math.min(8, landmarkCount));
         logDetails = ghConfig.getBool(Landmark.PREPARE + "log_details", false);
         minNodes = ghConfig.getInt(Landmark.PREPARE + "min_network_size", -1);
 
-        for (String loc : ghConfig.get(Landmark.PREPARE + "suggestions_location", "").split(",")) {
+        for (String loc : ghConfig.getString(Landmark.PREPARE + "suggestions_location", "").split(",")) {
             if (!loc.trim().isEmpty())
                 lmSuggestionsLocations.add(loc.trim());
         }
-        String lmWeightingsStr = ghConfig.get(Landmark.PREPARE + "weightings", "");
-        if (!lmWeightingsStr.isEmpty() && !lmWeightingsStr.equalsIgnoreCase("no") && !lmWeightingsStr.equalsIgnoreCase("false")) {
-            List<String> tmpLMWeightingList = Arrays.asList(lmWeightingsStr.split(","));
-            setWeightingsAsStrings(tmpLMWeightingList);
-        }
-
-        boolean enableThis = !weightingsAsStrings.isEmpty();
-        setEnabled(enableThis);
-        if (enableThis)
-            setDisablingAllowed(ghConfig.getBool(Landmark.INIT_DISABLING_ALLOWED, isDisablingAllowed()));
     }
 
     public int getLandmarks() {
         return landmarkCount;
     }
 
-    public LMPreparationHandler setDisablingAllowed(boolean disablingAllowed) {
-        this.disablingAllowed = disablingAllowed;
-        return this;
-    }
-
-    public final boolean isDisablingAllowed() {
-        return disablingAllowed || !isEnabled();
-    }
-
-    /**
-     * Enables or disables this handler. This speed-up mode is disabled by default.
-     */
-    public final LMPreparationHandler setEnabled(boolean enabled) {
-        this.enabled = enabled;
-        return this;
-    }
-
     public final boolean isEnabled() {
-        return enabled;
+        return !lmProfiles.isEmpty() || !lmConfigs.isEmpty() || !preparations.isEmpty();
     }
 
     public int getPreparationThreads() {
@@ -136,144 +102,87 @@ public class LMPreparationHandler {
         this.threadPool = java.util.concurrent.Executors.newFixedThreadPool(preparationThreads);
     }
 
+    public LMPreparationHandler setLMProfiles(LMProfile... lmProfiles) {
+        return setLMProfiles(Arrays.asList(lmProfiles));
+    }
+
     /**
-     * Enables the use of contraction hierarchies to reduce query times. Enabled by default.
-     *
-     * @param weightingList A list containing multiple weightings like: "fastest", "shortest" or
-     *                      your own weight-calculation type.
+     * Enables the use of landmarks to reduce query times.
      */
-    public LMPreparationHandler setWeightingsAsStrings(List<String> weightingList) {
-        if (weightingList.isEmpty())
-            throw new IllegalArgumentException("It is not allowed to pass an emtpy weightingList");
-
-        weightingsAsStrings.clear();
-        for (String strWeighting : weightingList) {
-            strWeighting = toLowerCase(strWeighting);
-            strWeighting = strWeighting.trim();
-            addWeighting(strWeighting);
+    public LMPreparationHandler setLMProfiles(Collection<LMProfile> lmProfiles) {
+        this.lmProfiles.clear();
+        this.maximumWeights.clear();
+        for (LMProfile profile : lmProfiles) {
+            if (profile.usesOtherPreparation())
+                continue;
+            maximumWeights.put(profile.getProfile(), profile.getMaximumLMWeight());
         }
+        this.lmProfiles.addAll(lmProfiles);
         return this;
     }
 
-    public List<String> getWeightingsAsStrings() {
-        if (this.weightingsAsStrings.isEmpty())
-            throw new IllegalStateException("Potential bug: weightingsAsStrings is empty");
-
-        return this.weightingsAsStrings;
-    }
-
-    public LMPreparationHandler addWeighting(String weighting) {
-        String[] str = weighting.split("\\|");
-        double value = -1;
-        if (str.length > 1) {
-            PMap map = new PMap(weighting);
-            value = map.getDouble("maximum", -1);
-        }
-
-        weightingsAsStrings.add(str[0]);
-        maximumWeights.put(str[0], value);
-        return this;
+    public List<LMProfile> getLMProfiles() {
+        return lmProfiles;
     }
 
     /**
      * Decouple weightings from PrepareLandmarks as we need weightings for the graphstorage and the
      * graphstorage for the preparation.
      */
-    public LMPreparationHandler addWeighting(Weighting weighting) {
-        weightings.add(weighting);
+    public LMPreparationHandler addLMConfig(LMConfig lmConfig) {
+        lmConfigs.add(lmConfig);
         return this;
     }
 
     public LMPreparationHandler addPreparation(PrepareLandmarks plm) {
         preparations.add(plm);
         int lastIndex = preparations.size() - 1;
-        if (lastIndex >= weightings.size())
-            throw new IllegalStateException("Cannot access weighting for PrepareLandmarks with " + plm.getWeighting()
-                    + ". Call add(Weighting) before");
+        if (lastIndex >= lmConfigs.size())
+            throw new IllegalStateException("Cannot access profile for PrepareLandmarks with " + plm.getLMConfig()
+                    + ". Call add(LMConfig) before");
 
-        if (preparations.get(lastIndex).getWeighting() != weightings.get(lastIndex))
-            throw new IllegalArgumentException("Weighting of PrepareContractionHierarchies " + preparations.get(lastIndex).getWeighting()
-                    + " needs to be identical to previously added " + weightings.get(lastIndex));
+        if (preparations.get(lastIndex).getLMConfig() != lmConfigs.get(lastIndex))
+            throw new IllegalArgumentException("LMConfig of PrepareLandmarks " + preparations.get(lastIndex).getLMConfig()
+                    + " needs to be identical to previously added " + lmConfigs.get(lastIndex));
         return this;
     }
 
-    public boolean hasWeightings() {
-        return !weightings.isEmpty();
-    }
-
-    public boolean hasPreparations() {
-        return !preparations.isEmpty();
+    public boolean hasLMProfiles() {
+        return !lmConfigs.isEmpty();
     }
 
     public int size() {
         return preparations.size();
     }
 
-    public List<Weighting> getWeightings() {
-        return weightings;
+    public List<LMConfig> getLMConfigs() {
+        return lmConfigs;
     }
 
     public List<PrepareLandmarks> getPreparations() {
         return preparations;
     }
 
-    /**
-     * @return a {@link RoutingAlgorithmFactory} for LM or throw an error if no preparation is available for the given
-     * hints
-     */
-    public RoutingAlgorithmFactory getAlgorithmFactory(HintsMap map) {
+    public PrepareLandmarks getPreparation(String profile) {
         if (preparations.isEmpty())
             throw new IllegalStateException("No LM preparations added yet");
 
-        // if no weighting or vehicle is specified for this request and there is only one preparation, use it
-        if ((map.getWeighting().isEmpty() || map.getVehicle().isEmpty()) && preparations.size() == 1) {
-            return new LMRoutingAlgorithmFactory(preparations.get(0), new RoutingAlgorithmFactorySimple());
+        List<String> profileNames = new ArrayList<>(preparations.size());
+        for (PrepareLandmarks preparation : preparations) {
+            profileNames.add(preparation.getLMConfig().getName());
+            if (preparation.getLMConfig().getName().equals(profile)) {
+                return preparation;
+            }
         }
-
-        List<Weighting> lmWeightings = new ArrayList<>(preparations.size());
-        for (final PrepareLandmarks p : preparations) {
-            lmWeightings.add(p.getWeighting());
-            if (p.getWeighting().matches(map))
-                return new LMRoutingAlgorithmFactory(p, new RoutingAlgorithmFactorySimple());
-        }
-
-        // There are situations where we can use the requested encoder/weighting with an existing LM preparation, even
-        // though the preparation was done with a different weighting. For example this works when the new weighting
-        // only yields higher (but never lower) weights than the one that was used for the preparation. However, its not
-        // trivial to check whether or not this is the case so we do not allow this for now.
-        String requestedString = (map.getWeighting().isEmpty() ? "*" : map.getWeighting()) + "|" +
-                (map.getVehicle().isEmpty() ? "*" : map.getVehicle());
-        throw new IllegalArgumentException("Cannot find matching LM profile for your request." +
-                "\nrequested: " + requestedString + "\navailable: " + lmWeightings);
+        throw new IllegalArgumentException("Cannot find LM preparation for the requested profile: '" + profile + "'" +
+                "\nYou can try disabling LM using " + Parameters.Landmark.DISABLE + "=true" +
+                "\navailable LM profiles: " + profileNames);
     }
 
     /**
-     * @see com.graphhopper.GraphHopper#calcPaths(GHRequest, GHResponse)
-     */
-    private static class LMRoutingAlgorithmFactory implements RoutingAlgorithmFactory {
-        private RoutingAlgorithmFactory defaultAlgoFactory;
-        private PrepareLandmarks p;
-
-        public LMRoutingAlgorithmFactory(PrepareLandmarks p, RoutingAlgorithmFactory defaultAlgoFactory) {
-            this.defaultAlgoFactory = defaultAlgoFactory;
-            this.p = p;
-        }
-
-        public RoutingAlgorithmFactory getDefaultAlgoFactory() {
-            return defaultAlgoFactory;
-        }
-
-        @Override
-        public RoutingAlgorithm createAlgo(Graph g, AlgorithmOptions opts) {
-            RoutingAlgorithm algo = defaultAlgoFactory.createAlgo(g, opts);
-            return p.getPreparedRoutingAlgorithm(g, algo, opts);
-        }
-    }
-
-    /**
-     * This method calculates the landmark data for all weightings (optionally in parallel) or if already existent loads it.
+     * This method calculates the landmark data for all profiles (optionally in parallel) or if already existent loads it.
      *
-     * @return true if the preparation data for at least one weighting was calculated.
+     * @return true if the preparation data for at least one profile was calculated.
      * @see CHPreparationHandler#prepare(StorableProperties, boolean) for a very similar method
      */
     public boolean loadOrDoWork(final StorableProperties properties, final boolean closeEarly) {
@@ -283,22 +192,20 @@ public class LMPreparationHandler {
         for (final PrepareLandmarks plm : preparations) {
             counter++;
             final int tmpCounter = counter;
-            final String name = AbstractWeighting.weightingToFileName(plm.getWeighting());
-            completionService.submit(new Runnable() {
-                @Override
-                public void run() {
-                    if (plm.loadExisting())
-                        return;
+            final String name = plm.getLMConfig().getName();
+            completionService.submit(() -> {
+                if (plm.loadExisting())
+                    return;
 
-                    LOGGER.info(tmpCounter + "/" + getPreparations().size() + " calling LM prepare.doWork for " + plm.getWeighting() + " ... (" + getMemInfo() + ")");
-                    prepared.set(true);
-                    Thread.currentThread().setName(name);
-                    plm.doWork();
-                    if (closeEarly) {
-                        plm.close();
-                    }
-                    properties.put(Landmark.PREPARE + "date." + name, createFormatter().format(new Date()));
+                LOGGER.info(tmpCounter + "/" + getPreparations().size() + " calling LM prepare.doWork for " + plm.getLMConfig().getWeighting() + " ... (" + getMemInfo() + ")");
+                prepared.set(true);
+                Thread.currentThread().setName(name);
+                plm.doWork();
+                if (closeEarly) {
+                    plm.close();
                 }
+                LOGGER.info("LM {} finished {}", name, getMemInfo());
+                properties.put(Landmark.PREPARE + "date." + name, createFormatter().format(new Date()));
             }, name);
         }
 
@@ -312,6 +219,7 @@ public class LMPreparationHandler {
             threadPool.shutdownNow();
             throw new RuntimeException(e);
         }
+        LOGGER.info("Finished LM preparation, {}", getMemInfo());
         return prepared.get();
     }
 
@@ -321,9 +229,10 @@ public class LMPreparationHandler {
     public void createPreparations(GraphHopperStorage ghStorage, LocationIndex locationIndex) {
         if (!isEnabled() || !preparations.isEmpty())
             return;
-        if (weightings.isEmpty())
+        if (lmConfigs.isEmpty())
             throw new IllegalStateException("No landmark weightings found");
 
+        LOGGER.info("Creating LM preparations, {}", getMemInfo());
         List<LandmarkSuggestion> lmSuggestions = new ArrayList<>(lmSuggestionsLocations.size());
         if (!lmSuggestionsLocations.isEmpty()) {
             try {
@@ -335,14 +244,14 @@ public class LMPreparationHandler {
             }
         }
 
-        for (Weighting weighting : getWeightings()) {
-            Double maximumWeight = maximumWeights.get(weighting.getName());
+        for (LMConfig lmConfig : lmConfigs) {
+            Double maximumWeight = maximumWeights.get(lmConfig.getName());
             if (maximumWeight == null)
                 throw new IllegalStateException("maximumWeight cannot be null. Default should be just negative. " +
-                        "Couldn't find " + weighting.getName() + " in " + maximumWeights);
+                        "Couldn't find " + lmConfig.getName() + " in " + maximumWeights);
 
             PrepareLandmarks tmpPrepareLM = new PrepareLandmarks(ghStorage.getDirectory(), ghStorage,
-                    weighting, landmarkCount, activeLandmarkCount).
+                    lmConfig, landmarkCount).
                     setLandmarkSuggestions(lmSuggestions).
                     setMaximumWeight(maximumWeight).
                     setLogDetails(logDetails);

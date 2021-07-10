@@ -35,7 +35,7 @@ public final class ShallowImmutablePointList extends PointList {
     public ShallowImmutablePointList(int fromOffset, int toOffset, PointList wrappedPointList) {
         if (fromOffset > toOffset)
             throw new IllegalArgumentException("from must be smaller or equal to end");
-        if (fromOffset < 0 || toOffset > wrappedPointList.getSize())
+        if (fromOffset < 0 || toOffset > wrappedPointList.size())
             throw new IllegalArgumentException("Illegal interval: " + fromOffset + ", " + toOffset);
         this.fromOffset = fromOffset;
         this.toOffset = toOffset;
@@ -47,7 +47,6 @@ public final class ShallowImmutablePointList extends PointList {
         return toOffset - fromOffset;
     }
 
-    @Override
     public int getSize() {
         return size();
     }
@@ -62,24 +61,24 @@ public final class ShallowImmutablePointList extends PointList {
     }
 
     @Override
-    public double getLatitude(int index) {
-        if (index > getSize())
-            throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + getSize());
-        return wrappedPointList.getLatitude(fromOffset + index);
+    public double getLat(int index) {
+        if (index > size())
+            throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + size());
+        return wrappedPointList.getLat(fromOffset + index);
     }
 
     @Override
-    public double getLongitude(int index) {
-        if (index > getSize())
-            throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + getSize());
-        return wrappedPointList.getLongitude(fromOffset + index);
+    public double getLon(int index) {
+        if (index > size())
+            throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + size());
+        return wrappedPointList.getLon(fromOffset + index);
     }
 
     @Override
-    public double getElevation(int index) {
-        if (index > getSize())
-            throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + getSize());
-        return wrappedPointList.getElevation(fromOffset + index);
+    public double getEle(int index) {
+        if (index > size())
+            throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + size());
+        return wrappedPointList.getEle(fromOffset + index);
     }
 
     @Override
@@ -118,11 +117,6 @@ public final class ShallowImmutablePointList extends PointList {
 
     @Override
     public void ensureNode(int nodeId) {
-        throw new UnsupportedOperationException(IMMUTABLE_ERR);
-    }
-
-    @Override
-    public void setNode(int nodeId, double lat, double lon) {
         throw new UnsupportedOperationException(IMMUTABLE_ERR);
     }
 

@@ -19,10 +19,7 @@ package com.graphhopper.routing.util.parsers;
 
 import com.graphhopper.reader.ReaderRelation;
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.routing.profiles.EncodedValue;
-import com.graphhopper.routing.profiles.EncodedValueLookup;
-import com.graphhopper.routing.profiles.EnumEncodedValue;
-import com.graphhopper.routing.profiles.RouteNetwork;
+import com.graphhopper.routing.ev.*;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.Helper;
 
@@ -55,7 +52,7 @@ public class OSMFootNetworkTagParser implements RelationTagParser {
             } else if ("iwn".equals(tag)) {
                 newFootNetwork = RouteNetwork.INTERNATIONAL;
             }
-            if (oldFootNetwork == RouteNetwork.OTHER || oldFootNetwork.ordinal() > newFootNetwork.ordinal())
+            if (oldFootNetwork == RouteNetwork.MISSING || oldFootNetwork.ordinal() > newFootNetwork.ordinal())
                 transformerRouteRelEnc.setEnum(false, relFlags, newFootNetwork);
         }
 
@@ -64,7 +61,7 @@ public class OSMFootNetworkTagParser implements RelationTagParser {
 
     @Override
     public void createEncodedValues(EncodedValueLookup lookup, List<EncodedValue> registerNewEncodedValue) {
-        registerNewEncodedValue.add(footRouteEnc = new EnumEncodedValue<>(RouteNetwork.key("foot"), RouteNetwork.class));
+        registerNewEncodedValue.add(footRouteEnc = new EnumEncodedValue<>(FootNetwork.KEY, RouteNetwork.class));
     }
 
     @Override

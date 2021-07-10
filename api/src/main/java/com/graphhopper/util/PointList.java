@@ -57,16 +57,6 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
         }
 
         @Override
-        public double getLatitude(int index) {
-            throw new RuntimeException("cannot access EMPTY PointList");
-        }
-
-        @Override
-        public double getLongitude(int index) {
-            throw new RuntimeException("cannot access EMPTY PointList");
-        }
-
-        @Override
         public boolean isEmpty() {
             return true;
         }
@@ -92,22 +82,12 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
         }
 
         @Override
-        public double calcDistance(DistanceCalc calc) {
-            throw new UnsupportedOperationException("cannot access EMPTY PointList");
-        }
-
-        @Override
         public PointList copy(int from, int end) {
             throw new RuntimeException("cannot copy EMPTY PointList");
         }
 
         @Override
         public PointList clone(boolean reverse) {
-            throw new UnsupportedOperationException("cannot access EMPTY PointList");
-        }
-
-        @Override
-        public double getElevation(int index) {
             throw new UnsupportedOperationException("cannot access EMPTY PointList");
         }
 
@@ -132,11 +112,6 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
         }
 
         @Override
-        public int getSize() {
-            return 0;
-        }
-
-        @Override
         public int size() {
             return 0;
         }
@@ -152,7 +127,6 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
         }
     };
 
-    private final static DistanceCalc3D distCalc3D = new DistanceCalc3D();
     final static String ERR_MSG = "Tried to access PointList with too big index!";
     protected int size = 0;
     protected boolean is3D;
@@ -189,11 +163,6 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
     @Override
     public void ensureNode(int nodeId) {
         incCap(nodeId + 1);
-    }
-
-    @Override
-    public void setNode(int nodeId, double lat, double lon) {
-        set(nodeId, lat, lon, Double.NaN);
     }
 
     @Override
@@ -248,9 +217,9 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
 
     public void add(PointAccess nodeAccess, int index) {
         if (is3D)
-            add(nodeAccess.getLatitude(index), nodeAccess.getLongitude(index), nodeAccess.getElevation(index));
+            add(nodeAccess.getLat(index), nodeAccess.getLon(index), nodeAccess.getEle(index));
         else
-            add(nodeAccess.getLatitude(index), nodeAccess.getLongitude(index));
+            add(nodeAccess.getLat(index), nodeAccess.getLon(index));
     }
 
     public void add(GHPoint point) {
@@ -262,14 +231,14 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
 
     public void add(PointList points) {
         ensureMutability();
-        int newSize = size + points.getSize();
+        int newSize = size + points.size();
         incCap(newSize);
-        for (int i = 0; i < points.getSize(); i++) {
+        for (int i = 0; i < points.size(); i++) {
             int tmp = size + i;
-            latitudes[tmp] = points.getLatitude(i);
-            longitudes[tmp] = points.getLongitude(i);
+            latitudes[tmp] = points.getLat(i);
+            longitudes[tmp] = points.getLon(i);
             if (is3D)
-                elevations[tmp] = points.getElevation(i);
+                elevations[tmp] = points.getEle(i);
         }
         size = newSize;
     }
@@ -284,21 +253,12 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
         return size;
     }
 
-    public int getSize() {
-        return size();
-    }
-
     public boolean isEmpty() {
         return size() == 0;
     }
 
     @Override
     public double getLat(int index) {
-        return getLatitude(index);
-    }
-
-    @Override
-    public double getLatitude(int index) {
         if (index >= size)
             throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + size);
 
@@ -307,11 +267,6 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
 
     @Override
     public double getLon(int index) {
-        return getLongitude(index);
-    }
-
-    @Override
-    public double getLongitude(int index) {
         if (index >= size)
             throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + size);
 
@@ -319,7 +274,7 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
     }
 
     @Override
-    public double getElevation(int index) {
+    public double getEle(int index) {
         if (index >= size)
             throw new ArrayIndexOutOfBoundsException(ERR_MSG + " index:" + index + ", size:" + size);
         if (!is3D)
@@ -334,11 +289,6 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
         if (!is3D)
             throw new IllegalStateException("This is a 2D PointList, you cannot set it's elevation");
         this.elevations[index] = ele;
-    }
-
-    @Override
-    public double getEle(int index) {
-        return getElevation(index);
     }
 
     public void reverse() {
@@ -380,17 +330,17 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < getSize(); i++) {
+        for (int i = 0; i < size(); i++) {
             if (i > 0)
                 sb.append(", ");
 
             sb.append('(');
-            sb.append(getLatitude(i));
+            sb.append(this.getLat(i));
             sb.append(',');
-            sb.append(getLongitude(i));
+            sb.append(this.getLon(i));
             if (this.is3D()) {
                 sb.append(',');
-                sb.append(getElevation(i));
+                sb.append(this.getEle(i));
             }
             sb.append(')');
         }
@@ -406,20 +356,20 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
     }
 
     public LineString toLineString(boolean includeElevation) {
-        Coordinate[] coordinates = new Coordinate[getSize() == 1 ? 2 : getSize()];
-        for (int i = 0; i < getSize(); i++) {
+        Coordinate[] coordinates = new Coordinate[size() == 1 ? 2 : size()];
+        for (int i = 0; i < size(); i++) {
             coordinates[i] = includeElevation ?
                     new Coordinate(
-                            round6(getLongitude(i)),
-                            round6(getLatitude(i)),
-                            round2(getElevation(i))) :
+                            round6(this.getLon(i)),
+                            round6(this.getLat(i)),
+                            round2(this.getEle(i))) :
                     new Coordinate(
-                            round6(getLongitude(i)),
-                            round6(getLatitude(i)));
+                            round6(this.getLon(i)),
+                            round6(this.getLat(i)));
         }
 
         // special case as just 1 point is not supported in the specification #1412
-        if (getSize() == 1)
+        if (size() == 1)
             coordinates[1] = coordinates[0];
         return factory.createLineString(new PackedCoordinateSequence.Double(coordinates, includeElevation ? 3 : 2));
     }
@@ -441,17 +391,17 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
         if (this.isEmpty() && other.isEmpty())
             return true;
 
-        if (this.getSize() != other.getSize() || this.is3D() != other.is3D())
+        if (size() != other.size() || this.is3D() != other.is3D())
             return false;
 
         for (int i = 0; i < size(); i++) {
-            if (!equalsEps(getLatitude(i), other.getLatitude(i)))
+            if (!equalsEps(this.getLat(i), other.getLat(i)))
                 return false;
 
-            if (!equalsEps(getLongitude(i), other.getLongitude(i)))
+            if (!equalsEps(this.getLon(i), other.getLon(i)))
                 return false;
 
-            if (this.is3D() && !equalsEps(getElevation(i), other.getElevation(i)))
+            if (this.is3D() && !equalsEps(this.getEle(i), other.getEle(i)))
                 return false;
         }
         return true;
@@ -472,14 +422,14 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
      * {@link ShallowImmutablePointList}, the cloned PointList will be a regular PointList.
      */
     public PointList clone(boolean reverse) {
-        PointList clonePL = new PointList(getSize(), is3D());
+        PointList clonePL = new PointList(size(), is3D());
         if (is3D())
-            for (int i = 0; i < getSize(); i++) {
-                clonePL.add(getLatitude(i), getLongitude(i), getElevation(i));
+            for (int i = 0; i < size(); i++) {
+                clonePL.add(this.getLat(i), this.getLon(i), this.getEle(i));
             }
         else
-            for (int i = 0; i < getSize(); i++) {
-                clonePL.add(getLatitude(i), getLongitude(i));
+            for (int i = 0; i < size(); i++) {
+                clonePL.add(this.getLat(i), this.getLon(i));
             }
         if (reverse)
             clonePL.reverse();
@@ -495,8 +445,8 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
     public PointList copy(int from, int end) {
         if (from > end)
             throw new IllegalArgumentException("from must be smaller or equal to end");
-        if (from < 0 || end > getSize())
-            throw new IllegalArgumentException("Illegal interval: " + from + ", " + end + ", size:" + getSize());
+        if (from < 0 || end > size())
+            throw new IllegalArgumentException("Illegal interval: " + from + ", " + end + ", size:" + size());
 
 
         PointList thisPL = this;
@@ -533,33 +483,12 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
     @Override
     public int hashCode() {
         int hash = 5;
-        for (int i = 0; i < getSize(); i++) {
-            hash = 73 * hash + (int) Math.round(getLatitude(i) * 1000000);
-            hash = 73 * hash + (int) Math.round(getLongitude(i) * 1000000);
-        }
-        hash = 73 * hash + this.getSize();
-        return hash;
-    }
-
-    public double calcDistance(DistanceCalc calc) {
-        double prevLat = Double.NaN;
-        double prevLon = Double.NaN;
-        double prevEle = Double.NaN;
-        double dist = 0;
         for (int i = 0; i < size(); i++) {
-            if (i > 0) {
-                if (is3D())
-                    dist += distCalc3D.calcDist(prevLat, prevLon, prevEle, getLat(i), getLon(i), getEle(i));
-                else
-                    dist += calc.calcDist(prevLat, prevLon, getLat(i), getLon(i));
-            }
-
-            prevLat = getLat(i);
-            prevLon = getLon(i);
-            if (is3D())
-                prevEle = getEle(i);
+            hash = 73 * hash + (int) Math.round(this.getLat(i) * 1000000);
+            hash = 73 * hash + (int) Math.round(this.getLon(i) * 1000000);
         }
-        return dist;
+        hash = 73 * hash + size();
+        return hash;
     }
 
     /**
@@ -578,7 +507,7 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
     }
 
     public GHPoint3D get(int index) {
-        return new GHPoint3D(getLatitude(index), getLongitude(index), getElevation(index));
+        return new GHPoint3D(this.getLat(index), this.getLon(index), this.getEle(index));
     }
 
     int getCapacity() {
@@ -592,12 +521,12 @@ public class PointList implements Iterable<GHPoint3D>, PointAccess {
 
             @Override
             public boolean hasNext() {
-                return counter < getSize();
+                return counter < size();
             }
 
             @Override
             public GHPoint3D next() {
-                if (counter >= getSize())
+                if (counter >= size())
                     throw new NoSuchElementException();
 
                 GHPoint3D point = PointList.this.get(counter);

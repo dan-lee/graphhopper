@@ -1,25 +1,23 @@
 package com.graphhopper.routing.util.spatialrules;
 
+import com.graphhopper.routing.ev.Country;
 import com.graphhopper.routing.util.spatialrules.countries.AustriaSpatialRule;
 import com.graphhopper.routing.util.spatialrules.countries.GermanySpatialRule;
+import org.locationtech.jts.geom.Polygon;
 
 import java.util.List;
 
-import org.locationtech.jts.geom.Polygon;
-
-public class CountriesSpatialRuleFactory implements SpatialRuleLookupBuilder.SpatialRuleFactory {
+public class CountriesSpatialRuleFactory implements SpatialRuleFactory {
+    
     @Override
     public SpatialRule createSpatialRule(String id, List<Polygon> polygons) {
-        switch (id) {
-            case "AUT":
-                AustriaSpatialRule austriaSpatialRule = new AustriaSpatialRule();
-                austriaSpatialRule.setBorders(polygons);
-                return austriaSpatialRule;
-            case "DEU":
-                GermanySpatialRule germanySpatialRule = new GermanySpatialRule();
-                germanySpatialRule.setBorders(polygons);
-                return germanySpatialRule;
+        switch (Country.find(id)) {
+        case AUT:
+            return new AustriaSpatialRule(polygons);
+        case DEU:
+            return new GermanySpatialRule(polygons);
+        default:
+            return null;
         }
-        return SpatialRule.EMPTY;
     }
 }

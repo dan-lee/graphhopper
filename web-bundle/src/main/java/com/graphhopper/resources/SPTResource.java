@@ -1,20 +1,31 @@
 package com.graphhopper.resources;
 
 import com.graphhopper.GraphHopper;
-import com.graphhopper.isochrone.algorithm.Isochrone;
-import com.graphhopper.routing.profiles.*;
+import com.graphhopper.config.Profile;
+import com.graphhopper.http.GHPointParam;
+import com.graphhopper.isochrone.algorithm.ShortestPathTree;
+import com.graphhopper.routing.ProfileResolver;
+import com.graphhopper.routing.ev.*;
 import com.graphhopper.routing.querygraph.QueryGraph;
-import com.graphhopper.routing.util.*;
+import com.graphhopper.routing.util.DefaultSnapFilter;
+import com.graphhopper.routing.util.EncodingManager;
+import com.graphhopper.routing.util.FiniteWeightFilter;
+import com.graphhopper.routing.util.TraversalMode;
+import com.graphhopper.routing.weighting.BlockAreaWeighting;
 import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.GraphEdgeIdFinder;
+import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.storage.index.LocationIndex;
-import com.graphhopper.storage.index.QueryResult;
+import com.graphhopper.storage.index.Snap;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.GHPoint;
+import io.dropwizard.jersey.params.LongParam;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
+import javax.validation.constraints.NotNull;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
@@ -24,12 +35,12 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-import static com.graphhopper.routing.weighting.TurnCostProvider.NO_TURN_COST_PROVIDER;
+import static com.graphhopper.resources.RouteResource.errorIfLegacyParameters;
+import static com.graphhopper.resources.RouteResource.removeLegacyParameters;
+import static com.graphhopper.routing.util.TraversalMode.EDGE_BASED;
+import static com.graphhopper.routing.util.TraversalMode.NODE_BASED;
 
 /**
  * This resource provides the entire shortest path tree as response. In a simple CSV format discussed at #1577.
@@ -39,54 +50,73 @@ public class SPTResource {
 
     private static final Logger logger = LoggerFactory.getLogger(SPTResource.class);
 
+    public static class IsoLabelWithCoordinates {
+        public int nodeId = -1;
+        public int edgeId, prevEdgeId, prevNodeId = -1;
+        public int timeMillis, prevTimeMillis;
+        public int distance, prevDistance;
+        public GHPoint coordinate, prevCoordinate;
+    }
+
     private final GraphHopper graphHopper;
+    private final ProfileResolver profileResolver;
     private final EncodingManager encodingManager;
 
     @Inject
-    public SPTResource(GraphHopper graphHopper, EncodingManager encodingManager) {
+    public SPTResource(GraphHopper graphHopper, ProfileResolver profileResolver, EncodingManager encodingManager) {
         this.graphHopper = graphHopper;
+        this.profileResolver = profileResolver;
         this.encodingManager = encodingManager;
     }
 
+    // Annotating this as application/json because errors come out as json, and
+    // IllegalArgumentExceptions are not mapped to a fixed mediatype, because in RouteResource, it could be GPX.
     @GET
-    @Produces("text/csv")
+    @Produces({"text/csv", "application/json"})
     public Response doGet(
             @Context UriInfo uriInfo,
-            @QueryParam("vehicle") @DefaultValue("car") String vehicle,
+            @QueryParam("profile") String profileName,
             @QueryParam("reverse_flow") @DefaultValue("false") boolean reverseFlow,
-            @QueryParam("point") GHPoint point,
+            @QueryParam("point") @NotNull GHPointParam point,
             @QueryParam("columns") String columnsParam,
-            @QueryParam("time_limit") @DefaultValue("600") long timeLimitInSeconds,
-            @QueryParam("distance_limit") @DefaultValue("-1") double distanceInMeter) {
-
-        if (point == null)
-            throw new IllegalArgumentException("point parameter cannot be null");
-
+            @QueryParam("time_limit") @DefaultValue("600") LongParam timeLimitInSeconds,
+            @QueryParam("distance_limit") @DefaultValue("-1") LongParam distanceInMeter) {
         StopWatch sw = new StopWatch().start();
-
-        if (!encodingManager.hasEncoder(vehicle))
-            throw new IllegalArgumentException("vehicle not supported:" + vehicle);
-
-        FlagEncoder encoder = encodingManager.getEncoder(vehicle);
-        EdgeFilter edgeFilter = DefaultEdgeFilter.allEdges(encoder);
-        LocationIndex locationIndex = graphHopper.getLocationIndex();
-        QueryResult qr = locationIndex.findClosest(point.lat, point.lon, edgeFilter);
-        if (!qr.isValid())
-            throw new IllegalArgumentException("Point not found:" + point);
-
-        Graph graph = graphHopper.getGraphHopperStorage();
-        QueryGraph queryGraph = QueryGraph.lookup(graph, qr);
-        HintsMap hintsMap = new HintsMap();
+        PMap hintsMap = new PMap();
         RouteResource.initHints(hintsMap, uriInfo.getQueryParameters());
+        hintsMap.putObject(Parameters.CH.DISABLE, true);
+        hintsMap.putObject(Parameters.Landmark.DISABLE, true);
+        if (Helper.isEmpty(profileName)) {
+            profileName = profileResolver.resolveProfile(hintsMap).getName();
+            removeLegacyParameters(hintsMap);
+        }
 
-        // todo: /spt with turn costs ?
-        Weighting weighting = graphHopper.createWeighting(hintsMap, encoder, NO_TURN_COST_PROVIDER);
-        Isochrone isochrone = new Isochrone(queryGraph, weighting, reverseFlow);
+        errorIfLegacyParameters(hintsMap);
+        Profile profile = graphHopper.getProfile(profileName);
+        if (profile == null)
+            throw new IllegalArgumentException("The requested profile '" + profileName + "' does not exist");
+        LocationIndex locationIndex = graphHopper.getLocationIndex();
+        Graph graph = graphHopper.getGraphHopperStorage();
+        Weighting weighting = graphHopper.createWeighting(profile, hintsMap);
+        BooleanEncodedValue inSubnetworkEnc = graphHopper.getEncodingManager().getBooleanEncodedValue(Subnetwork.key(profileName));
+        if (hintsMap.has(Parameters.Routing.BLOCK_AREA)) {
+            GraphEdgeIdFinder.BlockArea blockArea = GraphEdgeIdFinder.createBlockArea(graph, locationIndex,
+                    Collections.singletonList(point.get()), hintsMap, new FiniteWeightFilter(weighting));
+            weighting = new BlockAreaWeighting(weighting, blockArea);
+        }
+        Snap snap = locationIndex.findClosest(point.get().lat, point.get().lon, new DefaultSnapFilter(weighting, inSubnetworkEnc));
+        if (!snap.isValid())
+            throw new IllegalArgumentException("Point not found:" + point);
+        QueryGraph queryGraph = QueryGraph.create(graph, snap);
+        NodeAccess nodeAccess = queryGraph.getNodeAccess();
+        TraversalMode traversalMode = profile.isTurnCosts() ? EDGE_BASED : NODE_BASED;
+        ShortestPathTree shortestPathTree = new ShortestPathTree(queryGraph, weighting, reverseFlow, traversalMode);
 
-        if (distanceInMeter > 0) {
-            isochrone.setDistanceLimit(distanceInMeter);
+        if (distanceInMeter.get() > 0) {
+            shortestPathTree.setDistanceLimit(distanceInMeter.get());
         } else {
-            isochrone.setTimeLimit(timeLimitInSeconds);
+            double limit = timeLimitInSeconds.get() * 1000;
+            shortestPathTree.setTimeLimit(limit);
         }
 
         final String COL_SEP = ",", LINE_SEP = "\n";
@@ -115,7 +145,8 @@ public class SPTResource {
                 }
                 sb.append(LINE_SEP);
                 writer.write(sb.toString());
-                isochrone.search(qr.getClosestNode(), label -> {
+                shortestPathTree.search(snap.getClosestNode(), l -> {
+                    IsoLabelWithCoordinates label = isoLabelWithCoordinates(nodeAccess, l);
                     sb.setLength(0);
                     for (int colIndex = 0; colIndex < columns.size(); colIndex++) {
                         String col = columns.get(colIndex);
@@ -148,16 +179,16 @@ public class SPTResource {
                                 sb.append(label.prevCoordinate == null ? 0 : label.prevTimeMillis);
                                 continue;
                             case "longitude":
-                                sb.append(label.coordinate.lon);
+                                sb.append(Helper.round6(label.coordinate.lon));
                                 continue;
                             case "prev_longitude":
-                                sb.append(label.prevCoordinate == null ? null : label.prevCoordinate.lon);
+                                sb.append(label.prevCoordinate == null ? null : Helper.round6(label.prevCoordinate.lon));
                                 continue;
                             case "latitude":
-                                sb.append(label.coordinate.lat);
+                                sb.append(Helper.round6(label.coordinate.lat));
                                 continue;
                             case "prev_latitude":
-                                sb.append(label.prevCoordinate == null ? null : label.prevCoordinate.lat);
+                                sb.append(label.prevCoordinate == null ? null : Helper.round6(label.prevCoordinate.lat));
                                 continue;
                         }
 
@@ -198,12 +229,35 @@ public class SPTResource {
                     }
                 });
 
-                logger.info("took: " + sw.stop().getSeconds() + ", visited nodes:" + isochrone.getVisitedNodes() + ", " + uriInfo.getQueryParameters());
+                logger.info("took: " + sw.stop().getSeconds() + ", visited nodes:" + shortestPathTree.getVisitedNodes() + ", " + uriInfo.getQueryParameters());
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         };
-        // took header does not make sense as we stream
-        return Response.ok(out).build();
+        // Give media type explicitly since we are annotating CSV and JSON, because error messages are JSON.
+        return Response.ok(out).type("text/csv").build();
+    }
+
+    private IsoLabelWithCoordinates isoLabelWithCoordinates(NodeAccess na, ShortestPathTree.IsoLabel label) {
+        double lat = na.getLat(label.node);
+        double lon = na.getLon(label.node);
+        IsoLabelWithCoordinates isoLabelWC = new IsoLabelWithCoordinates();
+        isoLabelWC.nodeId = label.node;
+        isoLabelWC.coordinate = new GHPoint(lat, lon);
+        isoLabelWC.timeMillis = Math.round(label.time);
+        isoLabelWC.distance = (int) Math.round(label.distance);
+        isoLabelWC.edgeId = label.edge;
+        if (label.parent != null) {
+            ShortestPathTree.IsoLabel prevLabel = label.parent;
+            int prevNodeId = prevLabel.node;
+            double prevLat = na.getLat(prevNodeId);
+            double prevLon = na.getLon(prevNodeId);
+            isoLabelWC.prevNodeId = prevNodeId;
+            isoLabelWC.prevEdgeId = prevLabel.edge;
+            isoLabelWC.prevCoordinate = new GHPoint(prevLat, prevLon);
+            isoLabelWC.prevDistance = (int) Math.round(prevLabel.distance);
+            isoLabelWC.prevTimeMillis = Math.round(prevLabel.time);
+        }
+        return isoLabelWC;
     }
 }

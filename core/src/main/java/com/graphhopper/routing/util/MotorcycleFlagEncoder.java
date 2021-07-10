@@ -18,9 +18,10 @@
 package com.graphhopper.routing.util;
 
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.routing.profiles.DecimalEncodedValue;
-import com.graphhopper.routing.profiles.EncodedValue;
-import com.graphhopper.routing.profiles.UnsignedDecimalEncodedValue;
+import com.graphhopper.routing.ev.DecimalEncodedValue;
+import com.graphhopper.routing.ev.EncodedValue;
+import com.graphhopper.routing.ev.UnsignedDecimalEncodedValue;
+import com.graphhopper.routing.util.parsers.helpers.OSMValueExtractor;
 import com.graphhopper.routing.weighting.CurvatureWeighting;
 import com.graphhopper.routing.weighting.PriorityWeighting;
 import com.graphhopper.storage.IntsRef;
@@ -46,29 +47,14 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
     private DecimalEncodedValue curvatureEncoder;
 
     public MotorcycleFlagEncoder() {
-        this(5, 5, 0);
+        this(new PMap());
     }
 
     public MotorcycleFlagEncoder(PMap properties) {
-        this(properties.getInt("speed_bits", 5),
-                properties.getDouble("speed_factor", 5),
-                properties.getBool("turn_costs", false) ? 1 : 0);
-        this.setBlockFords(properties.getBool("block_fords", false));
-    }
+        super(properties.putObject("speed_two_directions", true));
 
-    public MotorcycleFlagEncoder(String propertiesStr) {
-        this(new PMap(propertiesStr));
-    }
-
-    public MotorcycleFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
-        super(speedBits, speedFactor, maxTurnCosts);
-        speedTwoDirections = true;
-        restrictions.remove("motorcar");
-        //  moped, mofa
-        restrictions.add("motorcycle");
-
-        absoluteBarriers.remove("bus_trap");
-        absoluteBarriers.remove("sump_buster");
+        blockByDefaultBarriers.remove("bus_trap");
+        blockByDefaultBarriers.remove("sump_buster");
 
         trackTypeSpeedMap.clear();
         defaultSpeedMap.clear();
@@ -117,11 +103,6 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
         defaultSpeedMap.put("track", 15);
     }
 
-    @Override
-    public int getVersion() {
-        return 3;
-    }
-
     /**
      * Define the place of the speedBits in the edge flags for car.
      */
@@ -130,7 +111,7 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
         // first two bits are reserved for route handling in superclass
         super.createEncodedValues(registerNewEncodedValue, prefix, index);
 
-        registerNewEncodedValue.add(priorityWayEncoder = new UnsignedDecimalEncodedValue(getKey(prefix, "priority"), 3, PriorityCode.getFactor(1), false));
+        registerNewEncodedValue.add(priorityWayEncoder = new UnsignedDecimalEncodedValue(getKey(prefix, "priority"), 4, PriorityCode.getFactor(1), false));
         registerNewEncodedValue.add(curvatureEncoder = new UnsignedDecimalEncodedValue(getKey(prefix, "curvature"), 4, 0.1, false));
     }
 
@@ -189,12 +170,12 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
             double speed = getSpeed(way);
             speed = applyMaxSpeed(way, speed);
 
-            double maxMCSpeed = parseSpeed(way.getTag("maxspeed:motorcycle"));
-            if (maxMCSpeed > 0 && maxMCSpeed < speed)
+            double maxMCSpeed = OSMValueExtractor.stringToKmh(way.getTag("maxspeed:motorcycle"));
+            if (isValidSpeed(maxMCSpeed) && maxMCSpeed < speed)
                 speed = maxMCSpeed * 0.9;
 
             // limit speed to max 30 km/h if bad surface
-            if (speed > 30 && way.hasTag("surface", badSurfaceSpeedMap))
+            if (isValidSpeed(speed) && speed > 30 && way.hasTag("surface", badSurfaceSpeedMap))
                 speed = 30;
 
             boolean isRoundabout = roundaboutEnc.getBool(false, edgeFlags);
@@ -216,22 +197,20 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
         } else {
             accessEnc.setBool(false, edgeFlags, true);
             accessEnc.setBool(true, edgeFlags, true);
-            double ferrySpeed = getFerrySpeed(way);
+            double ferrySpeed = ferrySpeedCalc.getSpeed(way);
             setSpeed(false, edgeFlags, ferrySpeed);
             setSpeed(true, edgeFlags, ferrySpeed);
         }
 
-        priorityWayEncoder.setDecimal(false, edgeFlags, PriorityCode.getFactor(handlePriority(way)));
-
-        // Set the curvature to the Maximum
-        curvatureEncoder.setDecimal(false, edgeFlags, PriorityCode.getFactor(10));
+        priorityWayEncoder.setDecimal(false, edgeFlags, PriorityCode.getValue(handlePriority(way)));
+        curvatureEncoder.setDecimal(false, edgeFlags, 10.0 / 7.0);
         return edgeFlags;
     }
 
     private int handlePriority(ReaderWay way) {
         String highway = way.getTag("highway", "");
         if (avoidSet.contains(highway)) {
-            return PriorityCode.WORST.getValue();
+            return PriorityCode.BAD.getValue();
         } else if (preferSet.contains(highway)) {
             return PriorityCode.BEST.getValue();
         }
@@ -286,6 +265,11 @@ public class MotorcycleFlagEncoder extends CarFlagEncoder {
      */
     protected double increaseBendinessImpact(double bendiness) {
         return (Math.pow(bendiness, 2));
+    }
+
+    @Override
+    public TransportationMode getTransportationMode() {
+        return TransportationMode.MOTORCYCLE;
     }
 
     @Override

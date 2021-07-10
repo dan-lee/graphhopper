@@ -17,10 +17,9 @@
  */
 package com.graphhopper.util;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class PMapTest {
 
@@ -28,23 +27,23 @@ public class PMapTest {
     public void singleStringPropertyCanBeRetrieved() {
         PMap subject = new PMap("foo=bar");
 
-        Assert.assertEquals("bar", subject.get("foo"));
+        assertEquals("bar", subject.getString("foo", ""));
     }
 
     @Test
     public void propertyFromStringWithMultiplePropertiesCanBeRetrieved() {
         PMap subject = new PMap("foo=valueA|bar=valueB");
 
-        Assert.assertEquals("valueA", subject.get("foo", ""));
-        Assert.assertEquals("valueB", subject.get("bar", ""));
+        assertEquals("valueA", subject.getString("foo", ""));
+        assertEquals("valueB", subject.getString("bar", ""));
     }
 
     @Test
     public void keyCannotHaveAnyCasing() {
         PMap subject = new PMap("foo=valueA|bar=valueB");
 
-        assertEquals("valueA", subject.get("foo", ""));
-        assertEquals("", subject.get("Foo", ""));
+        assertEquals("valueA", subject.getString("foo", ""));
+        assertEquals("", subject.getString("Foo", ""));
     }
 
     @Test

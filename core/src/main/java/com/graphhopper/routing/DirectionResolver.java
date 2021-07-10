@@ -17,15 +17,13 @@
  */
 package com.graphhopper.routing;
 
-import com.graphhopper.routing.profiles.BooleanEncodedValue;
-import com.graphhopper.routing.util.FlagEncoder;
-import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.GHPoint;
 
 import java.util.*;
+import java.util.function.BiPredicate;
 
 /**
  * This class is used to determine the pairs of edges that go into/out of a node of the routing graph. Two such pairs
@@ -54,12 +52,12 @@ import java.util.*;
 public class DirectionResolver {
     private final EdgeExplorer edgeExplorer;
     private final NodeAccess nodeAccess;
-    private final BooleanEncodedValue accessEnc;
+    private final BiPredicate<EdgeIteratorState, Boolean> isAccessible;
 
-    public DirectionResolver(Graph graph, BooleanEncodedValue accessEnc) {
+    public DirectionResolver(Graph graph, BiPredicate<EdgeIteratorState, Boolean> isAccessible) {
         this.edgeExplorer = graph.createEdgeExplorer();
         this.nodeAccess = graph.getNodeAccess();
-        this.accessEnc = accessEnc;
+        this.isAccessible = isAccessible;
     }
 
     /**
@@ -160,7 +158,7 @@ public class DirectionResolver {
         double iY = diffLat(snappedPoint, inPoint);
         double oX = diffLon(snappedPoint, outPoint);
         double oY = diffLat(snappedPoint, outPoint);
-        return !Helper.ANGLE_CALC.isClockwise(iX, iY, oX, oY, qX, qY);
+        return !AngleCalc.ANGLE_CALC.isClockwise(iX, iY, oX, oY, qX, qY);
     }
 
     private double diffLon(GHPoint p, GHPoint q) {
@@ -175,13 +173,8 @@ public class DirectionResolver {
         AdjacentEdges adjacentEdges = new AdjacentEdges();
         EdgeIterator iter = edgeExplorer.setBaseNode(node);
         while (iter.next()) {
-            // we are not interested in shortcuts here, even if there are shortcuts it is still sufficient to look
-            // at the original edges they begin with
-            if (iter instanceof CHEdgeIteratorState && ((CHEdgeIteratorState) iter).isShortcut()) {
-                continue;
-            }
-            boolean isIn = iter.getReverse(accessEnc);
-            boolean isOut = iter.get(accessEnc);
+            boolean isIn = isAccessible.test(iter, true);
+            boolean isOut = isAccessible.test(iter, false);
             if (!isIn && !isOut) {
                 continue;
             }
@@ -192,7 +185,7 @@ public class DirectionResolver {
             }
             // we are interested in the coordinates of the next point on this edge, it could be the adj tower node
             // but also a pillar node
-            final PointList geometry = iter.fetchWayGeometry(3);
+            final PointList geometry = iter.fetchWayGeometry(FetchMode.ALL);
             double nextPointLat = geometry.getLat(1);
             double nextPointLon = geometry.getLon(1);
 

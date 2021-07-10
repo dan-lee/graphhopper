@@ -17,10 +17,9 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.reader.OSMTurnRelation;
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.routing.profiles.EncodedValue;
-import com.graphhopper.routing.profiles.UnsignedDecimalEncodedValue;
+import com.graphhopper.routing.ev.EncodedValue;
+import com.graphhopper.routing.ev.UnsignedDecimalEncodedValue;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.PMap;
@@ -36,11 +35,10 @@ import java.util.*;
 public class CarFlagEncoder extends AbstractFlagEncoder {
     protected final Map<String, Integer> trackTypeSpeedMap = new HashMap<>();
     protected final Set<String> badSurfaceSpeedMap = new HashSet<>();
-
+    private boolean speedTwoDirections;
     // This value determines the maximal possible on roads with bad surfaces
     protected int badSurfaceSpeed;
 
-    protected boolean speedTwoDirections;
     /**
      * A map which associates string to speed. Get some impression:
      * http://www.itoworld.com/map/124#fullscreen
@@ -49,26 +47,19 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
     protected final Map<String, Integer> defaultSpeedMap = new HashMap<>();
 
     public CarFlagEncoder() {
-        this(5, 5, 0);
-    }
-
-    public CarFlagEncoder(PMap properties) {
-        this((int) properties.getLong("speed_bits", 5),
-                properties.getDouble("speed_factor", 5),
-                properties.getBool("turn_costs", false) ? 1 : 0);
-        this.speedTwoDirections = properties.getBool("speed_two_directions", false);
-        this.setBlockFords(properties.getBool("block_fords", false));
-        this.setBlockByDefault(properties.getBool("block_barriers", true));
-    }
-
-    public CarFlagEncoder(String propertiesStr) {
-        this(new PMap(propertiesStr));
+        this(new PMap());
     }
 
     public CarFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
-        super(speedBits, speedFactor, maxTurnCosts);
-        restrictions.addAll(Arrays.asList("motorcar", "motor_vehicle", "vehicle", "access"));
-        restrictedValues.add("private");
+        this(new PMap().putObject("speed_bits", speedBits).putObject("speed_factor", speedFactor).
+                putObject("max_turn_costs", maxTurnCosts));
+    }
+
+    public CarFlagEncoder(PMap properties) {
+        super(properties.getInt("speed_bits", 5),
+                properties.getDouble("speed_factor", 5),
+                properties.getInt("max_turn_costs", properties.getBool("turn_costs", false) ? 1 : 0));
+
         restrictedValues.add("agricultural");
         restrictedValues.add("forestry");
         restrictedValues.add("no");
@@ -76,25 +67,32 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
         restrictedValues.add("delivery");
         restrictedValues.add("military");
         restrictedValues.add("emergency");
+        restrictedValues.add("private");
+
+        blockPrivate(properties.getBool("block_private", true));
+        blockFords(properties.getBool("block_fords", false));
+        setSpeedTwoDirections(properties.getBool("speed_two_directions", false));
 
         intendedValues.add("yes");
+        intendedValues.add("designated");
         intendedValues.add("permissive");
 
-        potentialBarriers.add("gate");
-        potentialBarriers.add("lift_gate");
-        potentialBarriers.add("kissing_gate");
-        potentialBarriers.add("swing_gate");
-        potentialBarriers.add("cattle_grid");
+        passByDefaultBarriers.add("gate");
+        passByDefaultBarriers.add("lift_gate");
+        passByDefaultBarriers.add("swing_gate");
+        passByDefaultBarriers.add("cattle_grid");
+        passByDefaultBarriers.add("chain");
 
-        absoluteBarriers.add("fence");
-        absoluteBarriers.add("bollard");
-        absoluteBarriers.add("stile");
-        absoluteBarriers.add("turnstile");
-        absoluteBarriers.add("cycle_barrier");
-        absoluteBarriers.add("motorcycle_barrier");
-        absoluteBarriers.add("block");
-        absoluteBarriers.add("bus_trap");
-        absoluteBarriers.add("sump_buster");
+        blockByDefaultBarriers.add("kissing_gate");
+        blockByDefaultBarriers.add("fence");
+        blockByDefaultBarriers.add("bollard");
+        blockByDefaultBarriers.add("stile");
+        blockByDefaultBarriers.add("turnstile");
+        blockByDefaultBarriers.add("cycle_barrier");
+        blockByDefaultBarriers.add("motorcycle_barrier");
+        blockByDefaultBarriers.add("block");
+        blockByDefaultBarriers.add("bus_trap");
+        blockByDefaultBarriers.add("sump_buster");
 
         badSurfaceSpeedMap.add("cobblestone");
         badSurfaceSpeedMap.add("grass_paver");
@@ -141,12 +139,16 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
         // limit speed on bad surfaces to 30 km/h
         badSurfaceSpeed = 30;
         maxPossibleSpeed = 140;
-        speedDefault = defaultSpeedMap.get("secondary");
+    }
+
+    public CarFlagEncoder setSpeedTwoDirections(boolean value) {
+        speedTwoDirections = value;
+        return this;
     }
 
     @Override
-    public int getVersion() {
-        return 2;
+    public TransportationMode getTransportationMode() {
+        return TransportationMode.CAR;
     }
 
     /**
@@ -162,7 +164,7 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
     protected double getSpeed(ReaderWay way) {
         String highwayValue = way.getTag("highway");
         if (!Helper.isEmpty(highwayValue) && way.hasTag("motorroad", "yes")
-                && highwayValue != "motorway" && highwayValue != "motorway_link") {
+                && !"motorway".equals(highwayValue) && !"motorway_link".equals(highwayValue)) {
             highwayValue = "motorroad";
         }
         Integer speed = defaultSpeedMap.get(highwayValue);
@@ -253,7 +255,7 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
             }
 
         } else {
-            double ferrySpeed = getFerrySpeed(way);
+            double ferrySpeed = ferrySpeedCalc.getSpeed(way);
             accessEnc.setBool(false, edgeFlags, true);
             accessEnc.setBool(true, edgeFlags, true);
             setSpeed(false, edgeFlags, ferrySpeed);
@@ -269,8 +271,8 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
      */
     protected boolean isBackwardOneway(ReaderWay way) {
         return way.hasTag("oneway", "-1")
-                || way.hasTag("vehicle:forward", "no")
-                || way.hasTag("motor_vehicle:forward", "no");
+                || way.hasTag("vehicle:forward", restrictedValues)
+                || way.hasTag("motor_vehicle:forward", restrictedValues);
     }
 
     /**
@@ -278,16 +280,16 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
      */
     protected boolean isForwardOneway(ReaderWay way) {
         return !way.hasTag("oneway", "-1")
-                && !way.hasTag("vehicle:forward", "no")
-                && !way.hasTag("motor_vehicle:forward", "no");
+                && !way.hasTag("vehicle:forward", restrictedValues)
+                && !way.hasTag("motor_vehicle:forward", restrictedValues);
     }
 
     protected boolean isOneway(ReaderWay way) {
         return way.hasTag("oneway", oneways)
-                || way.hasTag("vehicle:backward")
-                || way.hasTag("vehicle:forward")
-                || way.hasTag("motor_vehicle:backward")
-                || way.hasTag("motor_vehicle:forward");
+                || way.hasTag("vehicle:backward", restrictedValues)
+                || way.hasTag("vehicle:forward", restrictedValues)
+                || way.hasTag("motor_vehicle:backward", restrictedValues)
+                || way.hasTag("motor_vehicle:forward", restrictedValues);
     }
 
     /**
@@ -297,7 +299,7 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
      */
     protected double applyBadSurfaceSpeed(ReaderWay way, double speed) {
         // limit speed if bad surface
-        if (badSurfaceSpeed > 0 && speed > badSurfaceSpeed && way.hasTag("surface", badSurfaceSpeedMap))
+        if (badSurfaceSpeed > 0 && isValidSpeed(speed) && speed > badSurfaceSpeed && way.hasTag("surface", badSurfaceSpeedMap))
             speed = badSurfaceSpeed;
         return speed;
     }

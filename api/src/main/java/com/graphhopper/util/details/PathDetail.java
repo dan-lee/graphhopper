@@ -27,24 +27,7 @@ public class PathDetail {
     private int first;
     private int last;
 
-    // unprotected constructor used only in AbstractPathDetailsBuilder
-    PathDetail(Object value) {
-        this.value = value;
-    }
-
-    public PathDetail(long value) {
-        this.value = value;
-    }
-
-    public PathDetail(double value) {
-        this.value = value;
-    }
-
-    public PathDetail(boolean value) {
-        this.value = value;
-    }
-
-    public PathDetail(String value) {
+    public PathDetail(Object value) {
         this.value = value;
     }
 
@@ -68,8 +51,6 @@ public class PathDetail {
     }
 
     public int getLast() {
-        if (last < first)
-            throw new IllegalStateException("last cannot be smaller than first");
         return last;
     }
 

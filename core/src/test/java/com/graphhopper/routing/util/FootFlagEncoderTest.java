@@ -19,21 +19,18 @@ package com.graphhopper.routing.util;
 
 import com.graphhopper.reader.ReaderNode;
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.routing.profiles.BooleanEncodedValue;
-import com.graphhopper.routing.profiles.DecimalEncodedValue;
+import com.graphhopper.routing.ev.BooleanEncodedValue;
+import com.graphhopper.routing.ev.DecimalEncodedValue;
 import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.GraphBuilder;
 import com.graphhopper.storage.IntsRef;
-import com.graphhopper.util.EdgeExplorer;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.GHUtility;
-import com.graphhopper.util.Helper;
-import org.junit.Test;
+import com.graphhopper.util.*;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 import java.text.DateFormat;
 import java.util.Date;
-
-import static org.junit.Assert.*;
 
 /**
  * @author Peter Karich
@@ -41,7 +38,7 @@ import static org.junit.Assert.*;
 public class FootFlagEncoderTest {
     private final EncodingManager encodingManager = EncodingManager.create("car,bike,foot");
     private final FootFlagEncoder footEncoder = (FootFlagEncoder) encodingManager.getEncoder("foot");
-    private final DecimalEncodedValue footAvSpeedEnc = footEncoder.getAverageSpeedEnc();
+    private final DecimalEncodedValue footAvgSpeedEnc = footEncoder.getAverageSpeedEnc();
     private final BooleanEncodedValue footAccessEnc = footEncoder.getAccessEnc();
     private final DecimalEncodedValue carAvSpeedEnc = encodingManager.getEncoder("car").getAverageSpeedEnc();
     private final BooleanEncodedValue carAccessEnc = encodingManager.getEncoder("car").getAccessEnc();
@@ -51,8 +48,8 @@ public class FootFlagEncoderTest {
         IntsRef fl = encodingManager.createEdgeFlags();
         footAccessEnc.setBool(false, fl, true);
         footAccessEnc.setBool(true, fl, true);
-        footAvSpeedEnc.setDecimal(false, fl, 10);
-        assertEquals(10, footEncoder.getSpeed(fl), 1e-1);
+        footAvgSpeedEnc.setDecimal(false, fl, 10);
+        assertEquals(10, footAvgSpeedEnc.getDecimal(false, fl), 1e-1);
     }
 
     @Test
@@ -60,36 +57,21 @@ public class FootFlagEncoderTest {
         ReaderWay way = new ReaderWay(1);
         way.setTag("highway", "service");
         IntsRef flags = footEncoder.handleWayTags(encodingManager.createEdgeFlags(), way, footEncoder.getAccess(way));
-        assertEquals(FootFlagEncoder.MEAN_SPEED, footEncoder.getSpeed(flags), 1e-1);
+        assertEquals(FootFlagEncoder.MEAN_SPEED, footAvgSpeedEnc.getDecimal(false, flags), 1e-1);
 
         way.setTag("highway", "steps");
         flags = footEncoder.handleWayTags(encodingManager.createEdgeFlags(), way, footEncoder.getAccess(way));
-        assertTrue(FootFlagEncoder.MEAN_SPEED > footEncoder.getSpeed(flags));
-    }
-
-    @Test
-    public void testBasics() {
-        IntsRef edgeFlags = encodingManager.createEdgeFlags();
-        footEncoder.flagsDefault(edgeFlags, true, true);
-        assertEquals(FootFlagEncoder.MEAN_SPEED, footEncoder.getSpeed(edgeFlags), 1e-1);
-
-        IntsRef ef1 = encodingManager.createEdgeFlags();
-        footEncoder.flagsDefault(ef1, true, false);
-        IntsRef ef2 = encodingManager.createEdgeFlags();
-        footEncoder.flagsDefault(ef2, false, true);
-        assertEquals(footAccessEnc.getBool(false, ef1), footAccessEnc.getBool(true, ef2));
-        assertEquals(footEncoder.getSpeed(ef1), footEncoder.getSpeed(ef1), 1e-1);
+        assertTrue(FootFlagEncoder.MEAN_SPEED > footAvgSpeedEnc.getDecimal(false, flags));
     }
 
     @Test
     public void testCombined() {
         Graph g = new GraphBuilder(encodingManager).create();
-        FlagEncoder carEncoder = encodingManager.getEncoder("car");
         EdgeIteratorState edge = g.edge(0, 1);
-        edge.set(footAvSpeedEnc, 10.0).set(footAccessEnc, true).setReverse(footAccessEnc, true);
-        edge.set(carAvSpeedEnc, 100.0).set(carAccessEnc, true).setReverse(carAccessEnc, false);
+        edge.set(footAvgSpeedEnc, 10.0).set(footAccessEnc, true, true);
+        edge.set(carAvSpeedEnc, 100.0).set(carAccessEnc, true, false);
 
-        assertEquals(10, edge.get(footAvSpeedEnc), 1e-1);
+        assertEquals(10, edge.get(footAvgSpeedEnc), 1e-1);
         assertTrue(edge.get(footAccessEnc));
         assertTrue(edge.getReverse(footAccessEnc));
 
@@ -98,7 +80,7 @@ public class FootFlagEncoderTest {
         assertFalse(edge.getReverse(carAccessEnc));
 
         IntsRef raw = encodingManager.createEdgeFlags();
-        footAvSpeedEnc.setDecimal(false, raw, 10);
+        footAvgSpeedEnc.setDecimal(false, raw, 10);
         footAccessEnc.setBool(false, raw, true);
         footAccessEnc.setBool(true, raw, true);
         assertEquals(0, carAvSpeedEnc.getDecimal(false, raw), 1e-1);
@@ -107,10 +89,10 @@ public class FootFlagEncoderTest {
     @Test
     public void testGraph() {
         Graph g = new GraphBuilder(encodingManager).create();
-        g.edge(0, 1).setDistance(10).set(footAvSpeedEnc, 10.0).set(footAccessEnc, true).setReverse(footAccessEnc, true);
-        g.edge(0, 2).setDistance(10).set(footAvSpeedEnc, 5.0).set(footAccessEnc, true).setReverse(footAccessEnc, true);
-        g.edge(1, 3).setDistance(10).set(footAvSpeedEnc, 10.0).set(footAccessEnc, true).setReverse(footAccessEnc, true);
-        EdgeExplorer out = g.createEdgeExplorer(DefaultEdgeFilter.outEdges(footEncoder));
+        g.edge(0, 1).setDistance(10).set(footAvgSpeedEnc, 10.0).set(footAccessEnc, true, true);
+        g.edge(0, 2).setDistance(10).set(footAvgSpeedEnc, 5.0).set(footAccessEnc, true, true);
+        g.edge(1, 3).setDistance(10).set(footAvgSpeedEnc, 10.0).set(footAccessEnc, true, true);
+        EdgeExplorer out = g.createEdgeExplorer(AccessFilter.outEdges(footEncoder.getAccessEnc()));
         assertEquals(GHUtility.asSet(1, 2), GHUtility.getNeighbors(out.setBaseNode(0)));
         assertEquals(GHUtility.asSet(0, 3), GHUtility.getNeighbors(out.setBaseNode(1)));
         assertEquals(GHUtility.asSet(0), GHUtility.getNeighbors(out.setBaseNode(2)));
@@ -268,9 +250,9 @@ public class FootFlagEncoderTest {
         way.setTag("route", "ferry");
         // a bit longer than an hour
         way.setTag("duration:seconds", "4000");
+        assertEquals(30, footEncoder.ferrySpeedCalc.getSpeed(way), .1);
         IntsRef flags = footEncoder.handleWayTags(encodingManager.createEdgeFlags(), way, footEncoder.getAccess(way));
-        assertTrue(footEncoder.getSpeed(flags) > footEncoder.getMaxSpeed());
-        assertEquals(20, footEncoder.getSpeed(flags), .1);
+        assertEquals(15, footAvgSpeedEnc.getDecimal(false, flags), .1);
     }
 
     @Test
@@ -282,12 +264,12 @@ public class FootFlagEncoderTest {
 
         way.setTag("sidewalk", "yes");
         flags = footEncoder.handleWayTags(encodingManager.createEdgeFlags(), way, footEncoder.getAccess(way));
-        assertEquals(5, footEncoder.getSpeed(flags), 1e-1);
+        assertEquals(5, footAvgSpeedEnc.getDecimal(false, flags), 1e-1);
 
         way.clearTags();
         way.setTag("highway", "track");
         flags = footEncoder.handleWayTags(encodingManager.createEdgeFlags(), way, footEncoder.getAccess(way));
-        assertEquals(5, footEncoder.getSpeed(flags), 1e-1);
+        assertEquals(5, footAvgSpeedEnc.getDecimal(false, flags), 1e-1);
     }
 
     @Test
@@ -297,15 +279,15 @@ public class FootFlagEncoderTest {
         assertEquals(PriorityCode.UNCHANGED.getValue(), footEncoder.handlePriority(way, null));
 
         way.setTag("highway", "primary");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.AVOID.getValue(), footEncoder.handlePriority(way, null));
 
         way.setTag("highway", "track");
         way.setTag("bicycle", "official");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.SLIGHT_AVOID.getValue(), footEncoder.handlePriority(way, null));
 
         way.setTag("highway", "track");
         way.setTag("bicycle", "designated");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.SLIGHT_AVOID.getValue(), footEncoder.handlePriority(way, null));
 
         way.setTag("highway", "cycleway");
         way.setTag("bicycle", "designated");
@@ -326,14 +308,14 @@ public class FootFlagEncoderTest {
         way.setTag("highway", "road");
         way.setTag("bicycle", "official");
         way.setTag("sidewalk", "no");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.SLIGHT_AVOID.getValue(), footEncoder.handlePriority(way, null));
 
         way.clearTags();
         way.setTag("highway", "trunk");
         way.setTag("sidewalk", "no");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.AVOID.getValue(), footEncoder.handlePriority(way, null));
         way.setTag("sidewalk", "none");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), footEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.AVOID.getValue(), footEncoder.handlePriority(way, null));
 
         way.clearTags();
         way.setTag("highway", "residential");
@@ -347,12 +329,12 @@ public class FootFlagEncoderTest {
         way.setTag("highway", "track");
         way.setTag("sac_scale", "hiking");
         IntsRef flags = footEncoder.handleWayTags(encodingManager.createEdgeFlags(), way, footEncoder.getAccess(way));
-        assertEquals(FootFlagEncoder.MEAN_SPEED, footEncoder.getSpeed(flags), 1e-1);
+        assertEquals(FootFlagEncoder.MEAN_SPEED, footAvgSpeedEnc.getDecimal(false, flags), 1e-1);
 
         way.setTag("highway", "track");
         way.setTag("sac_scale", "mountain_hiking");
         flags = footEncoder.handleWayTags(encodingManager.createEdgeFlags(), way, footEncoder.getAccess(way));
-        assertEquals(FootFlagEncoder.SLOW_SPEED, footEncoder.getSpeed(flags), 1e-1);
+        assertEquals(FootFlagEncoder.SLOW_SPEED, footAvgSpeedEnc.getDecimal(false, flags), 1e-1);
     }
 
     @Test
@@ -361,13 +343,13 @@ public class FootFlagEncoderTest {
         ReaderNode node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
         // no barrier!
-        assertTrue(footEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, footEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
         node.setTag("access", "yes");
         // no barrier!
-        assertTrue(footEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, footEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
@@ -384,7 +366,7 @@ public class FootFlagEncoderTest {
         node.setTag("access", "no");
         node.setTag("foot", "yes");
         // no barrier!
-        assertTrue(footEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, footEncoder.handleNodeTags(node));
 
         node.setTag("locked", "yes");
         // barrier!
@@ -392,31 +374,40 @@ public class FootFlagEncoderTest {
     }
 
     @Test
+    public void testChainBarrier() {
+        // by default allow access through the gate for bike & foot!
+        ReaderNode node = new ReaderNode(1, -1, -1);
+        node.setTag("barrier", "chain");
+        assertEquals(0, footEncoder.handleNodeTags(node));
+        node.setTag("foot", "no");
+        assertTrue(footEncoder.handleNodeTags(node) > 0);
+    }
+
+    @Test
     public void testFord() {
-        // by default deny access through fords!
+        // by default do not block access due to fords!
         ReaderNode node = new ReaderNode(1, -1, -1);
         node.setTag("ford", "no");
-        assertTrue(footEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, footEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("ford", "yes");
         // no barrier!
-        assertTrue(footEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, footEncoder.handleNodeTags(node));
 
         // barrier!
         node.setTag("foot", "no");
         assertTrue(footEncoder.handleNodeTags(node) > 0);
 
-        // Now let's allow fords for foot
-        footEncoder.setBlockFords(Boolean.FALSE);
-
+        FootFlagEncoder tmpEncoder = new FootFlagEncoder(new PMap("block_fords=true"));
+        EncodingManager.create(tmpEncoder);
         node = new ReaderNode(1, -1, -1);
         node.setTag("ford", "no");
-        assertTrue(footEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, tmpEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("ford", "yes");
-        assertTrue(footEncoder.handleNodeTags(node) == 0);
+        assertTrue(tmpEncoder.handleNodeTags(node) != 0);
     }
 
     @Test
@@ -427,7 +418,7 @@ public class FootFlagEncoderTest {
         ReaderNode node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
         // potential barriers are no barrier by default
-        assertTrue(tmpFootEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, tmpFootEncoder.handleNodeTags(node));
         node.setTag("access", "no");
         assertTrue(tmpFootEncoder.handleNodeTags(node) > 0);
 
@@ -437,26 +428,26 @@ public class FootFlagEncoderTest {
         assertTrue(tmpFootEncoder.handleNodeTags(node) > 0);
         node.setTag("barrier", "fence");
         node.setTag("access", "yes");
-        assertTrue(tmpFootEncoder.handleNodeTags(node) > 0);
+        assertFalse(tmpFootEncoder.handleNodeTags(node) > 0);
 
-        // Now let's block potential barriers per default (if no other access tag exists)
-        tmpFootEncoder.setBlockByDefault(true);
-
+        // pass potential barriers per default (if no other access tag exists)
+        tmpFootEncoder = new FootFlagEncoder();
+        EncodingManager.create(tmpFootEncoder);
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
-        assertTrue(tmpFootEncoder.handleNodeTags(node) > 0);
+        assertFalse(tmpFootEncoder.handleNodeTags(node) > 0);
         node.setTag("access", "yes");
-        assertTrue(tmpFootEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, tmpFootEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "fence");
         assertTrue(tmpFootEncoder.handleNodeTags(node) > 0);
 
-        // Let's stop block potential barriers to test if barrier:cattle_grid is non blocking
-        tmpFootEncoder.setBlockByDefault(false);
-
+        // don't block potential barriers: barrier:cattle_grid should not block here
+        tmpFootEncoder = new FootFlagEncoder();
+        EncodingManager.create(tmpFootEncoder);
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "cattle_grid");
-        assertTrue(tmpFootEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, tmpFootEncoder.handleNodeTags(node));
     }
 }

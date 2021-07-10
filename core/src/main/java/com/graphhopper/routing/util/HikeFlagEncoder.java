@@ -20,14 +20,11 @@ package com.graphhopper.routing.util;
 import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.routing.weighting.PriorityWeighting;
 import com.graphhopper.storage.IntsRef;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.Helper;
-import com.graphhopper.util.PMap;
-import com.graphhopper.util.PointList;
+import com.graphhopper.util.*;
 
 import java.util.TreeMap;
 
-import static com.graphhopper.routing.profiles.RouteNetwork.*;
+import static com.graphhopper.routing.ev.RouteNetwork.*;
 import static com.graphhopper.routing.util.PriorityCode.*;
 
 /**
@@ -42,12 +39,14 @@ public class HikeFlagEncoder extends FootFlagEncoder {
     }
 
     public HikeFlagEncoder(PMap properties) {
-        this((int) properties.getLong("speed_bits", 4),
-                properties.getDouble("speed_factor", 1));
-        this.setBlockFords(properties.getBool("block_fords", false));
+        this(properties.getInt("speed_bits", 4), properties.getDouble("speed_factor", 1));
+
+        blockPrivate(properties.getBool("block_private", true));
+        blockFords(properties.getBool("block_fords", false));
+        speedTwoDirections = properties.getBool("speed_two_directions", false);
     }
 
-    public HikeFlagEncoder(int speedBits, double speedFactor) {
+    protected HikeFlagEncoder(int speedBits, double speedFactor) {
         super(speedBits, speedFactor);
 
         routeMap.put(INTERNATIONAL, BEST.getValue());
@@ -62,40 +61,35 @@ public class HikeFlagEncoder extends FootFlagEncoder {
     }
 
     @Override
-    public int getVersion() {
-        return 3;
-    }
-
-    @Override
     void collect(ReaderWay way, TreeMap<Double, Integer> weightToPrioMap) {
         String highway = way.getTag("highway");
         if (way.hasTag("foot", "designated"))
             weightToPrioMap.put(100d, PREFER.getValue());
 
         double maxSpeed = getMaxSpeed(way);
-        if (safeHighwayTags.contains(highway) || maxSpeed > 0 && maxSpeed <= 20) {
+        if (safeHighwayTags.contains(highway) || (isValidSpeed(maxSpeed) && maxSpeed <= 20)) {
             weightToPrioMap.put(40d, PREFER.getValue());
             if (way.hasTag("tunnel", intendedValues)) {
                 if (way.hasTag("sidewalk", sidewalksNoValues))
-                    weightToPrioMap.put(40d, REACH_DEST.getValue());
+                    weightToPrioMap.put(40d, AVOID.getValue());
                 else
                     weightToPrioMap.put(40d, UNCHANGED.getValue());
             }
-        } else if (maxSpeed > 50 || avoidHighwayTags.contains(highway)) {
+        } else if ((isValidSpeed(maxSpeed) && maxSpeed > 50) || avoidHighwayTags.contains(highway)) {
             if (way.hasTag("sidewalk", sidewalksNoValues))
-                weightToPrioMap.put(45d, WORST.getValue());
+                weightToPrioMap.put(45d, BAD.getValue());
             else
-                weightToPrioMap.put(45d, REACH_DEST.getValue());
+                weightToPrioMap.put(45d, AVOID.getValue());
         }
 
         if (way.hasTag("bicycle", "official") || way.hasTag("bicycle", "designated"))
-            weightToPrioMap.put(44d, AVOID_IF_POSSIBLE.getValue());
+            weightToPrioMap.put(44d, SLIGHT_AVOID.getValue());
     }
 
 
     @Override
     public void applyWayTags(ReaderWay way, EdgeIteratorState edge) {
-        PointList pl = edge.fetchWayGeometry(3);
+        PointList pl = edge.fetchWayGeometry(FetchMode.ALL);
         if (!pl.is3D())
             return;
 
@@ -105,14 +99,14 @@ public class HikeFlagEncoder extends FootFlagEncoder {
             return;
 
         // Decrease the speed for ele increase (incline), and slightly decrease the speed for ele decrease (decline)
-        double prevEle = pl.getElevation(0);
+        double prevEle = pl.getEle(0);
         double fullDistance = edge.getDistance();
 
         // for short edges an incline makes no sense and for 0 distances could lead to NaN values for speed, see #432
         if (fullDistance < 2)
             return;
 
-        double eleDelta = Math.abs(pl.getElevation(pl.size() - 1) - prevEle);
+        double eleDelta = Math.abs(pl.getEle(pl.size() - 1) - prevEle);
         double slope = eleDelta / fullDistance;
 
         IntsRef edgeFlags = edge.getFlags();

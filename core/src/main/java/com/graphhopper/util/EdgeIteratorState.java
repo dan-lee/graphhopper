@@ -17,7 +17,8 @@
  */
 package com.graphhopper.util;
 
-import com.graphhopper.routing.profiles.*;
+import com.graphhopper.routing.ev.*;
+import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.IntsRef;
 
 /**
@@ -65,6 +66,11 @@ public interface EdgeIteratorState {
         public void setBool(boolean reverse, IntsRef ref, boolean value) {
             throw new IllegalStateException("reverse state cannot be modified");
         }
+
+        @Override
+        public boolean isStoreTwoDirections() {
+            return false;
+        }
     };
 
     /**
@@ -72,6 +78,16 @@ public interface EdgeIteratorState {
      * values, except that for an implementation it is recommended that they'll be contiguous.
      */
     int getEdge();
+
+    /**
+     * Returns the edge key of the current edge. The edge id can be derived from the edge key by calling
+     * {@link GHUtility#getEdgeFromEdgeKey(int)}, but the edge key also contains information about the
+     * direction of the edge. The edge key is even when the edge is oriented in storage direction and odd
+     * otherwise. You can use the edge key to retrieve an edge state in the associated direction using
+     * {@link Graph#getEdgeIteratorStateForKey(int)}. Loop edges are always returned in 'forward' direction even when
+     * you use an odd edge key.
+     */
+    int getEdgeKey();
 
     /**
      * @return the edge id of the first original edge of the current edge. This is needed for shortcuts
@@ -106,12 +122,10 @@ public interface EdgeIteratorState {
      * (docs/core/low-level-api.md#what-are-pillar-and-tower-nodes). Updates to the returned list
      * are not reflected in the graph, for that you've to use setWayGeometry.
      *
-     * @param mode can be <ul> <li>0 = only pillar nodes, no tower nodes</li> <li>1 = inclusive the
-     *             base tower node only</li> <li>2 = inclusive the adjacent tower node only</li> <li>3 =
-     *             inclusive the base and adjacent tower node</li> </ul>
-     * @return pillar nodes
+     * @param mode {@link FetchMode}
+     * @return the pillar and/or tower nodes depending on the mode.
      */
-    PointList fetchWayGeometry(int mode);
+    PointList fetchWayGeometry(FetchMode mode);
 
     /**
      * @param list is a sorted collection of coordinates between the base node and the current adjacent node. Specify
@@ -146,6 +160,8 @@ public interface EdgeIteratorState {
 
     EdgeIteratorState setReverse(BooleanEncodedValue property, boolean value);
 
+    EdgeIteratorState set(BooleanEncodedValue property, boolean fwd, boolean bwd);
+
     int get(IntEncodedValue property);
 
     EdgeIteratorState set(IntEncodedValue property, int value);
@@ -153,6 +169,8 @@ public interface EdgeIteratorState {
     int getReverse(IntEncodedValue property);
 
     EdgeIteratorState setReverse(IntEncodedValue property, int value);
+
+    EdgeIteratorState set(IntEncodedValue property, int fwd, int bwd);
 
     double get(DecimalEncodedValue property);
 
@@ -162,13 +180,27 @@ public interface EdgeIteratorState {
 
     EdgeIteratorState setReverse(DecimalEncodedValue property, double value);
 
-    <T extends Enum> T get(EnumEncodedValue<T> property);
+    EdgeIteratorState set(DecimalEncodedValue property, double fwd, double bwd);
 
-    <T extends Enum> EdgeIteratorState set(EnumEncodedValue<T> property, T value);
+    <T extends Enum<?>> T get(EnumEncodedValue<T> property);
 
-    <T extends Enum> T getReverse(EnumEncodedValue<T> property);
+    <T extends Enum<?>> EdgeIteratorState set(EnumEncodedValue<T> property, T value);
 
-    <T extends Enum> EdgeIteratorState setReverse(EnumEncodedValue<T> property, T value);
+    <T extends Enum<?>> T getReverse(EnumEncodedValue<T> property);
+
+    <T extends Enum<?>> EdgeIteratorState setReverse(EnumEncodedValue<T> property, T value);
+
+    <T extends Enum<?>> EdgeIteratorState set(EnumEncodedValue<T> property, T fwd, T bwd);
+    
+    String get(StringEncodedValue property);
+    
+    EdgeIteratorState set(StringEncodedValue property, String value);
+    
+    String getReverse(StringEncodedValue property);
+    
+    EdgeIteratorState setReverse(StringEncodedValue property, String value);
+    
+    EdgeIteratorState set(StringEncodedValue property, String fwd, String bwd);
 
     String getName();
 

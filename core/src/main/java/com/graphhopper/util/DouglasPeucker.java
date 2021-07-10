@@ -28,6 +28,8 @@ package com.graphhopper.util;
  */
 public class DouglasPeucker {
     private double normedMaxDist;
+    private double elevationMaxDistance;
+    private double maxDistance;
     private DistanceCalc calc;
     private boolean approx;
 
@@ -35,14 +37,16 @@ public class DouglasPeucker {
         setApproximation(true);
         // 1m
         setMaxDistance(1);
+        // elevation ignored by default
+        setElevationMaxDistance(Double.MAX_VALUE);
     }
 
     public void setApproximation(boolean a) {
         approx = a;
         if (approx)
-            calc = Helper.DIST_PLANE;
+            calc = DistancePlaneProjection.DIST_PLANE;
         else
-            calc = Helper.DIST_EARTH;
+            calc = DistanceCalcEarth.DIST_EARTH;
     }
 
     /**
@@ -50,6 +54,15 @@ public class DouglasPeucker {
      */
     public DouglasPeucker setMaxDistance(double dist) {
         this.normedMaxDist = calc.calcNormalizedDist(dist);
+        this.maxDistance = dist;
+        return this;
+    }
+
+    /**
+     * maximum elevation distance of discrepancy (from the normal way) in meters
+     */
+    public DouglasPeucker setElevationMaxDistance(double dist) {
+        this.elevationMaxDistance = dist;
         return this;
     }
 
@@ -108,17 +121,26 @@ public class DouglasPeucker {
         }
         int indexWithMaxDist = -1;
         double maxDist = -1;
-        double firstLat = points.getLatitude(fromIndex);
-        double firstLon = points.getLongitude(fromIndex);
-        double lastLat = points.getLatitude(lastIndex);
-        double lastLon = points.getLongitude(lastIndex);
+        double elevationFactor = maxDistance / elevationMaxDistance;
+        double firstLat = points.getLat(fromIndex);
+        double firstLon = points.getLon(fromIndex);
+        double firstEle = points.getEle(fromIndex);
+        double lastLat = points.getLat(lastIndex);
+        double lastLon = points.getLon(lastIndex);
+        double lastEle = points.getEle(lastIndex);
         for (int i = fromIndex + 1; i < lastIndex; i++) {
-            double lat = points.getLatitude(i);
+            double lat = points.getLat(i);
             if (Double.isNaN(lat)) {
                 continue;
             }
-            double lon = points.getLongitude(i);
-            double dist = calc.calcNormalizedEdgeDistance(lat, lon, firstLat, firstLon, lastLat, lastLon);
+            double lon = points.getLon(i);
+            double ele = points.getEle(i);
+            double dist = (points.is3D() && elevationMaxDistance < Double.MAX_VALUE && !Double.isNaN(firstEle) && !Double.isNaN(lastEle) && !Double.isNaN(ele))
+                    ? calc.calcNormalizedEdgeDistance3D(
+                    lat, lon, ele * elevationFactor,
+                    firstLat, firstLon, firstEle * elevationFactor,
+                    lastLat, lastLon, lastEle * elevationFactor)
+                    : calc.calcNormalizedEdgeDistance(lat, lon, firstLat, firstLon, lastLat, lastLon);
             if (maxDist < dist) {
                 indexWithMaxDist = i;
                 maxDist = dist;
@@ -148,8 +170,8 @@ public class DouglasPeucker {
     static void removeNaN(PointList pointList) {
         int curr = 0;
         for (int i = 0; i < pointList.size(); i++) {
-            if (!Double.isNaN(pointList.getLatitude(i))) {
-                pointList.set(curr, pointList.getLatitude(i), pointList.getLongitude(i), pointList.getElevation(i));
+            if (!Double.isNaN(pointList.getLat(i))) {
+                pointList.set(curr, pointList.getLat(i), pointList.getLon(i), pointList.getEle(i));
                 curr++;
             }
         }

@@ -19,19 +19,16 @@ package com.graphhopper.routing.util;
 
 import com.graphhopper.reader.ReaderNode;
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.routing.profiles.BooleanEncodedValue;
-import com.graphhopper.routing.profiles.DecimalEncodedValue;
+import com.graphhopper.routing.ev.BooleanEncodedValue;
+import com.graphhopper.routing.ev.DecimalEncodedValue;
 import com.graphhopper.storage.*;
-import com.graphhopper.util.EdgeExplorer;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.GHUtility;
-import com.graphhopper.util.Helper;
-import org.junit.Test;
+import com.graphhopper.util.*;
+import org.junit.jupiter.api.Test;
 
 import java.text.DateFormat;
 import java.util.Date;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * @author don-philipe
@@ -54,26 +51,12 @@ public class WheelchairFlagEncoderTest {
     }
 
     @Test
-    public void testBasics() {
-        IntsRef edgeFlags = encodingManager.createEdgeFlags();
-        wheelchairEncoder.flagsDefault(edgeFlags, true, true);
-        assertEquals(FootFlagEncoder.MEAN_SPEED, wheelchairAvSpeedEnc.getDecimal(false, edgeFlags), .1);
-
-        IntsRef ef1 = encodingManager.createEdgeFlags();
-        wheelchairEncoder.flagsDefault(ef1, true, false);
-        IntsRef ef2 = encodingManager.createEdgeFlags();
-        wheelchairEncoder.flagsDefault(ef2, false, true);
-        assertEquals(wheelchairAccessEnc.getBool(false, ef1), wheelchairAccessEnc.getBool(true, ef2));
-        assertEquals(wheelchairAvSpeedEnc.getDecimal(false, ef1), wheelchairAvSpeedEnc.getDecimal(false, ef1), .1);
-    }
-
-    @Test
     public void testCombined() {
         Graph g = new GraphBuilder(encodingManager).create();
         FlagEncoder carEncoder = encodingManager.getEncoder("car");
         EdgeIteratorState edge = g.edge(0, 1);
-        edge.set(wheelchairAvSpeedEnc, 10.0).set(wheelchairAccessEnc, true).setReverse(wheelchairAccessEnc, true);
-        edge.set(carAvSpeedEnc, 100.0).set(carAccessEnc, true).setReverse(carAccessEnc, false);
+        edge.set(wheelchairAvSpeedEnc, 10.0).set(wheelchairAccessEnc, true, true);
+        edge.set(carAvSpeedEnc, 100.0).set(carAccessEnc, true, false);
 
         assertEquals(10, edge.get(wheelchairAvSpeedEnc), .1);
         assertTrue(edge.get(wheelchairAccessEnc));
@@ -93,10 +76,10 @@ public class WheelchairFlagEncoderTest {
     @Test
     public void testGraph() {
         Graph g = new GraphBuilder(encodingManager).create();
-        g.edge(0, 1).setDistance(10).set(wheelchairAvSpeedEnc, 10.0).set(wheelchairAccessEnc, true).setReverse(wheelchairAccessEnc, true);
-        g.edge(0, 2).setDistance(10).set(wheelchairAvSpeedEnc, 5.0).set(wheelchairAccessEnc, true).setReverse(wheelchairAccessEnc, true);
-        g.edge(1, 3).setDistance(10).set(wheelchairAvSpeedEnc, 10.0).set(wheelchairAccessEnc, true).setReverse(wheelchairAccessEnc, true);
-        EdgeExplorer out = g.createEdgeExplorer(DefaultEdgeFilter.outEdges(wheelchairEncoder));
+        g.edge(0, 1).setDistance(10).set(wheelchairAvSpeedEnc, 10.0).set(wheelchairAccessEnc, true, true);
+        g.edge(0, 2).setDistance(10).set(wheelchairAvSpeedEnc, 5.0).set(wheelchairAccessEnc, true, true);
+        g.edge(1, 3).setDistance(10).set(wheelchairAvSpeedEnc, 10.0).set(wheelchairAccessEnc, true, true);
+        EdgeExplorer out = g.createEdgeExplorer(AccessFilter.outEdges(wheelchairEncoder.getAccessEnc()));
         assertEquals(GHUtility.asSet(1, 2), GHUtility.getNeighbors(out.setBaseNode(0)));
         assertEquals(GHUtility.asSet(0, 3), GHUtility.getNeighbors(out.setBaseNode(1)));
         assertEquals(GHUtility.asSet(0), GHUtility.getNeighbors(out.setBaseNode(2)));
@@ -228,7 +211,7 @@ public class WheelchairFlagEncoderTest {
         assertTrue(wheelchairEncoder.getAccess(way).canSkip());
 
         way.clearTags();
-        // allow pathes as they are used as generic path
+        // allow paths as they are used as generic path
         way.setTag("highway", "path");
         assertTrue(wheelchairEncoder.getAccess(way).isWay());
 
@@ -293,17 +276,6 @@ public class WheelchairFlagEncoderTest {
     }
 
     @Test
-    public void testFerrySpeed() {
-        ReaderWay way = new ReaderWay(1);
-        way.setTag("route", "ferry");
-        // a bit longer than an hour
-        way.setTag("duration:seconds", "4000");
-        IntsRef flags = wheelchairEncoder.handleWayTags(encodingManager.createEdgeFlags(), way, wheelchairEncoder.getAccess(way));
-        assertTrue(wheelchairEncoder.getSpeed(flags) > wheelchairEncoder.getMaxSpeed());
-        assertEquals(20, wheelchairEncoder.getSpeed(flags), .1);
-    }
-
-    @Test
     public void testMixSpeedAndSafe() {
         ReaderWay way = new ReaderWay(1);
         way.setTag("highway", "motorway");
@@ -327,15 +299,15 @@ public class WheelchairFlagEncoderTest {
         assertEquals(PriorityCode.UNCHANGED.getValue(), wheelchairEncoder.handlePriority(way, null));
 
         way.setTag("highway", "primary");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), wheelchairEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.AVOID.getValue(), wheelchairEncoder.handlePriority(way, null));
 
         way.setTag("highway", "track");
         way.setTag("bicycle", "official");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), wheelchairEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.SLIGHT_AVOID.getValue(), wheelchairEncoder.handlePriority(way, null));
 
         way.setTag("highway", "track");
         way.setTag("bicycle", "designated");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), wheelchairEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.SLIGHT_AVOID.getValue(), wheelchairEncoder.handlePriority(way, null));
 
         way.setTag("highway", "cycleway");
         way.setTag("bicycle", "designated");
@@ -356,14 +328,14 @@ public class WheelchairFlagEncoderTest {
         way.setTag("highway", "road");
         way.setTag("bicycle", "official");
         way.setTag("sidewalk", "no");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), wheelchairEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.SLIGHT_AVOID.getValue(), wheelchairEncoder.handlePriority(way, null));
 
         way.clearTags();
         way.setTag("highway", "trunk");
         way.setTag("sidewalk", "no");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), wheelchairEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.AVOID.getValue(), wheelchairEncoder.handlePriority(way, null));
         way.setTag("sidewalk", "none");
-        assertEquals(PriorityCode.AVOID_IF_POSSIBLE.getValue(), wheelchairEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.AVOID.getValue(), wheelchairEncoder.handlePriority(way, null));
 
         way.clearTags();
         way.setTag("highway", "residential");
@@ -380,7 +352,7 @@ public class WheelchairFlagEncoderTest {
         way.setTag("highway", "footway");
         assertEquals(PriorityCode.PREFER.getValue(), wheelchairEncoder.handlePriority(way, null));
         way.setTag("wheelchair", "limited");
-        assertEquals(PriorityCode.REACH_DEST.getValue(), wheelchairEncoder.handlePriority(way, null));
+        assertEquals(PriorityCode.AVOID.getValue(), wheelchairEncoder.handlePriority(way, null));
     }
 
     @Test
@@ -389,13 +361,13 @@ public class WheelchairFlagEncoderTest {
         ReaderNode node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
         // no barrier!
-        assertTrue(wheelchairEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, wheelchairEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
         node.setTag("access", "yes");
         // no barrier!
-        assertTrue(wheelchairEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, wheelchairEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
@@ -412,7 +384,7 @@ public class WheelchairFlagEncoderTest {
         node.setTag("access", "no");
         node.setTag("foot", "yes");
         // no barrier!
-        assertTrue(wheelchairEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, wheelchairEncoder.handleNodeTags(node));
 
         node.setTag("locked", "yes");
         // barrier!
@@ -426,12 +398,12 @@ public class WheelchairFlagEncoderTest {
 
         ReaderNode node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
-        // potential barriers are no barrier by default
-        assertTrue(tmpWheelchairEncoder.handleNodeTags(node) == 0);
+        // passByDefaultBarriers are no barrier by default
+        assertEquals(0, tmpWheelchairEncoder.handleNodeTags(node));
         node.setTag("access", "no");
         assertTrue(tmpWheelchairEncoder.handleNodeTags(node) > 0);
 
-        // absolute barriers always block
+        // these barriers block
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "fence");
         assertTrue(tmpWheelchairEncoder.handleNodeTags(node) > 0);
@@ -441,35 +413,25 @@ public class WheelchairFlagEncoderTest {
         assertTrue(tmpWheelchairEncoder.handleNodeTags(node) > 0);
         node.setTag("barrier", "turnstile");
         assertTrue(tmpWheelchairEncoder.handleNodeTags(node) > 0);
+        // Explictly allowed access is allowed
         node.setTag("barrier", "fence");
         node.setTag("access", "yes");
-        assertTrue(tmpWheelchairEncoder.handleNodeTags(node) > 0);
-
-        // Now let's block potential barriers per default (if no other access tag exists)
-        tmpWheelchairEncoder.setBlockByDefault(true);
+        assertTrue(tmpWheelchairEncoder.handleNodeTags(node) == 0);
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "gate");
-        assertTrue(tmpWheelchairEncoder.handleNodeTags(node) > 0);
         node.setTag("access", "yes");
-        assertTrue(tmpWheelchairEncoder.handleNodeTags(node) == 0);
+        assertEquals(0, tmpWheelchairEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "kerb");
-        assertTrue(tmpWheelchairEncoder.handleNodeTags(node) > 0);
-        node.setTag("wheelchair", "yes");
         assertTrue(tmpWheelchairEncoder.handleNodeTags(node) == 0);
+        node.setTag("wheelchair", "yes");
+        assertEquals(0, tmpWheelchairEncoder.handleNodeTags(node));
 
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "fence");
         assertTrue(tmpWheelchairEncoder.handleNodeTags(node) > 0);
-
-        // Let's stop block potential barriers to test if barrier:cattle_grid is non blocking
-        tmpWheelchairEncoder.setBlockByDefault(false);
-
-        node = new ReaderNode(1, -1, -1);
-        node.setTag("barrier", "cattle_grid");
-        assertTrue(tmpWheelchairEncoder.handleNodeTags(node) == 0);
     }
 
     @Test
@@ -528,14 +490,14 @@ public class WheelchairFlagEncoderTest {
         na.setNode(1, 51.1, 12.002, 55);
         EdgeIteratorState edge0 = gs.edge(0, 1).setWayGeometry(Helper.createPointList3D(51.1, 12.0011, 49, 51.1, 12.0015, 55));
         edge0.setDistance(100);
-        GHUtility.setProperties(edge0, wheelchairEncoder, 5, 5);
+        GHUtility.setSpeed(5, 5, wheelchairEncoder, edge0);
 
         // incline of 10% over all
         na.setNode(2, 51.2, 12.101, 50);
         na.setNode(3, 51.2, 12.102, 60);
         EdgeIteratorState edge1 = gs.edge(2, 3).setWayGeometry(Helper.createPointList3D(51.2, 12.1011, 49, 51.2, 12.1015, 55));
         edge1.setDistance(100);
-        GHUtility.setProperties(edge1, wheelchairEncoder, 5, 5);
+        GHUtility.setSpeed(5, 5, wheelchairEncoder, edge1);
         return gs;
     }
 

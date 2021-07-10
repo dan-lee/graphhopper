@@ -17,14 +17,14 @@
  */
 package com.graphhopper.util;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * @author Peter Karich
@@ -46,20 +46,20 @@ public class DouglasPeuckerTest {
     public void testParse() {
         PointList pointList = new PointList();
         pointList.parse2DJSON("[[11.571499218899739,49.945605917549265],[11.571664621792689,49.94570668665409]]");
-        assertEquals(49.945605917549265, pointList.getLatitude(0), 1e-6);
-        assertEquals(11.571499218899739, pointList.getLongitude(0), 1e-6);
-        assertEquals(49.94570668665409, pointList.getLatitude(1), 1e-6);
-        assertEquals(11.571664621792689, pointList.getLongitude(1), 1e-6);
+        assertEquals(49.945605917549265, pointList.getLat(0), 1e-6);
+        assertEquals(11.571499218899739, pointList.getLon(0), 1e-6);
+        assertEquals(49.94570668665409, pointList.getLat(1), 1e-6);
+        assertEquals(11.571664621792689, pointList.getLon(1), 1e-6);
     }
 
     @Test
     public void testPathSimplify() {
         PointList pointList = new PointList();
         pointList.parse2DJSON(points1);
-        assertEquals(32, pointList.getSize());
+        assertEquals(32, pointList.size());
         new DouglasPeucker().setMaxDistance(.5).simplify(pointList);
         // Arrays.asList(2, 4, 6, 7, 8, 9, 12, 14, 15, 17, 18, 19, 20, 22, 24, 27, 28, 29, 31, 33),
-        assertEquals(20, pointList.getSize());
+        assertEquals(20, pointList.size());
     }
 
     @Test
@@ -67,15 +67,15 @@ public class DouglasPeuckerTest {
         PointList pointList = new PointList();
         pointList.parse2DJSON(points1);
         DouglasPeucker dp = new DouglasPeucker().setMaxDistance(.5);
-        assertEquals(32, pointList.getSize());
+        assertEquals(32, pointList.size());
         dp.simplify(pointList);
-        assertEquals(20, pointList.getSize());
-        assertFalse(pointList.toString(), pointList.toString().contains("NaN"));
+        assertEquals(20, pointList.size());
+        assertFalse(pointList.toString().contains("NaN"), pointList.toString());
 
         pointList.clear();
         pointList.parse2DJSON(points1);
-        dp.simplify(pointList, 0, pointList.size() -1);
-        assertEquals(20, pointList.getSize());
+        dp.simplify(pointList, 0, pointList.size() - 1);
+        assertEquals(20, pointList.size());
 
         pointList.clear();
         pointList.parse2DJSON(points1);
@@ -92,10 +92,10 @@ public class DouglasPeuckerTest {
     public void testSimplifyCheckPointOrder() {
         PointList pointList = new PointList();
         pointList.parse2DJSON(points2);
-        assertEquals(13, pointList.getSize());
+        assertEquals(13, pointList.size());
         new DouglasPeucker().setMaxDistance(.5).simplify(pointList);
-        assertEquals(11, pointList.getSize());
-        assertFalse(pointList.toString(), pointList.toString().contains("NaN"));
+        assertEquals(11, pointList.size());
+        assertFalse(pointList.toString().contains("NaN"), pointList.toString());
         assertEquals("(50.203764443183644,9.961074440801317), (50.20318963087774,9.960999562464645), (50.202952888673984,9.96094144793469), (50.20267889356641,9.96223002587773), (50.201853928011374,9.961859918278305), "
                         + "(50.20138565901039,9.961668810881722), (50.20128507617008,9.96216874485095), (50.20088553877664,9.961953795595925), (50.200686794534775,9.961899033827313), (50.20014066696481,9.961716680863127), (50.199798499043254,9.961588158344957)",
                 pointList.toString());
@@ -136,5 +136,70 @@ public class DouglasPeuckerTest {
             given.add((int) pl.getLat(i));
         }
         assertEquals(expected, given);
+    }
+
+    @Test
+    public void test3dPathSimplify() {
+        PointList pointList = new PointList(5, true);
+        pointList.add(0, 0, 0);
+        pointList.add(0.01, 0, 10); // can be removed
+        pointList.add(0.02, 0, 20); // can be removed
+        pointList.add(0.03, 0, 30); // can't be removed
+        pointList.add(0.04, 0, 50);
+        new DouglasPeucker().setMaxDistance(1).setElevationMaxDistance(1).simplify(pointList);
+        assertEquals("(0.0,0.0,0.0), (0.03,0.0,30.0), (0.04,0.0,50.0)", pointList.toString());
+    }
+
+    @Test
+    public void test3dPathSimplifyElevationDisabled() {
+        PointList pointList = new PointList(5, true);
+        pointList.add(0, 0, 0);
+        pointList.add(0.03, 0, 30); // would be kept, if we cared about elevation
+        pointList.add(0.04, 0, 50);
+        new DouglasPeucker().setMaxDistance(1).setElevationMaxDistance(Double.MAX_VALUE).simplify(pointList);
+        assertEquals("(0.0,0.0,0.0), (0.04,0.0,50.0)", pointList.toString());
+    }
+
+    @Test
+    public void test3dPathSimplifyElevationMaxDistFive() {
+        PointList pointList = new PointList(5, true);
+        pointList.add(0, 0, 0);
+        pointList.add(0.01, 0, 14); // <5m from straight line (10), remove
+        pointList.add(0.02, 0, 20); // on straight line, remove
+        pointList.add(0.03, 0, 30); // >5m from straight line, keep
+        pointList.add(0.04, 0, 50);
+        new DouglasPeucker().setMaxDistance(1).setElevationMaxDistance(5).simplify(pointList);
+        assertEquals("(0.0,0.0,0.0), (0.03,0.0,30.0), (0.04,0.0,50.0)", pointList.toString());
+    }
+
+    @Test
+    public void test3dPathSimplifyWithMissingElevation() {
+        PointList pointList = new PointList(5, true);
+        pointList.add(0, 0, 0);
+        pointList.add(0, 0.5, Double.NaN); // on straight line in 2d space, ignore elevation
+        pointList.add(0, 1, 14); // <5m from straight line (10), remove
+        pointList.add(1, 1, 20);
+        new DouglasPeucker().setMaxDistance(1).setElevationMaxDistance(1).simplify(pointList);
+        assertEquals("(0.0,0.0,0.0), (0.0,1.0,14.0), (1.0,1.0,20.0)", pointList.toString());
+    }
+
+    @Test
+    public void test3dSimplifyStartEndSame() {
+        PointList pointList = new PointList(3, true);
+        pointList.add(0, 0, 0);
+        pointList.add(0.03, 0, 30);
+        pointList.add(0, 0, 0);
+        new DouglasPeucker().setMaxDistance(1).setElevationMaxDistance(1).simplify(pointList);
+        assertEquals("(0.0,0.0,0.0), (0.03,0.0,30.0), (0.0,0.0,0.0)", pointList.toString());
+    }
+
+    @Test
+    public void test2dSimplifyStartEndSame() {
+        PointList pointList = new PointList(3, false);
+        pointList.add(0, 0);
+        pointList.add(0.03, 0);
+        pointList.add(0, 0);
+        new DouglasPeucker().setMaxDistance(1).setElevationMaxDistance(1).simplify(pointList);
+        assertEquals("(0.0,0.0), (0.03,0.0), (0.0,0.0)", pointList.toString());
     }
 }

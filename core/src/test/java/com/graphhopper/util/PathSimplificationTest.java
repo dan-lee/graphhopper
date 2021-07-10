@@ -17,12 +17,11 @@
  */
 package com.graphhopper.util;
 
-import com.graphhopper.PathWrapper;
+import com.graphhopper.ResponsePath;
 import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.routing.Dijkstra;
 import com.graphhopper.routing.InstructionsFromEdges;
 import com.graphhopper.routing.Path;
-import com.graphhopper.routing.profiles.Roundabout;
 import com.graphhopper.routing.util.CarFlagEncoder;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.util.FlagEncoder;
@@ -35,14 +34,14 @@ import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.util.details.PathDetail;
 import com.graphhopper.util.details.PathDetailsBuilderFactory;
 import com.graphhopper.util.details.PathDetailsFromEdges;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.*;
 
 import static com.graphhopper.util.Parameters.Details.AVERAGE_SPEED;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Robin Boldt
@@ -55,7 +54,7 @@ public class PathSimplificationTest {
     private EncodingManager carManager;
     private FlagEncoder carEncoder;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         carEncoder = new CarFlagEncoder();
         carManager = EncodingManager.create(carEncoder);
@@ -89,33 +88,33 @@ public class PathSimplificationTest {
 
         IntsRef relFlags = carManager.createRelationFlags();
         EdgeIteratorState tmpEdge;
-        tmpEdge = g.edge(0, 1, 10000, true).setName("0-1");
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(0, 1).setDistance(10000)).setName("0-1");
         EncodingManager.AcceptWay map = new EncodingManager.AcceptWay();
         assertTrue(carManager.acceptWay(w, map));
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
-        tmpEdge = g.edge(1, 2, 11000, true).setName("1-2");
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(1, 2).setDistance(11000)).setName("1-2");
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
 
         w.setTag("maxspeed", "20");
-        tmpEdge = g.edge(0, 3, 11000, true);
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(0, 3).setDistance(11000));
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
-        tmpEdge = g.edge(1, 4, 10000, true).setName("1-4");
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(1, 4).setDistance(10000)).setName("1-4");
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
-        tmpEdge = g.edge(2, 5, 11000, true).setName("5-2");
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(2, 5).setDistance(11000)).setName("5-2");
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
 
         w.setTag("maxspeed", "30");
-        tmpEdge = g.edge(3, 6, 11000, true).setName("3-6");
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(3, 6).setDistance(11000)).setName("3-6");
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
-        tmpEdge = g.edge(4, 7, 10000, true).setName("4-7");
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(4, 7).setDistance(10000)).setName("4-7");
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
-        tmpEdge = g.edge(5, 8, 10000, true).setName("5-8");
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(5, 8).setDistance(10000)).setName("5-8");
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
 
         w.setTag("maxspeed", "40");
-        tmpEdge = g.edge(6, 7, 11000, true).setName("6-7");
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(6, 7).setDistance(11000)).setName("6-7");
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
-        tmpEdge = g.edge(7, 8, 10000, true);
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(7, 8).setDistance(10000));
         PointList list = new PointList();
         list.add(1.0, 1.15);
         list.add(1.0, 1.16);
@@ -125,9 +124,9 @@ public class PathSimplificationTest {
 
         w.setTag("maxspeed", "50");
         // missing edge name
-        tmpEdge = g.edge(9, 10, 10000, true);
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(9, 10).setDistance(10000));
         tmpEdge.setFlags(carManager.handleWayTags(w, map, relFlags));
-        tmpEdge = g.edge(8, 9, 20000, true);
+        tmpEdge = GHUtility.setSpeed(60, true, true, carEncoder, g.edge(8, 9).setDistance(20000));
         list.clear();
         list.add(1.0, 1.3);
         list.add(1.0, 1.3001);
@@ -144,10 +143,10 @@ public class PathSimplificationTest {
         Map<String, List<PathDetail>> details = PathDetailsFromEdges.calcDetails(p, carManager, weighting,
                 Arrays.asList(AVERAGE_SPEED), new PathDetailsBuilderFactory(), 0);
 
-        PathWrapper pathWrapper = new PathWrapper();
-        pathWrapper.setInstructions(wayList);
-        pathWrapper.addPathDetails(details);
-        pathWrapper.setPoints(p.calcPoints());
+        ResponsePath responsePath = new ResponsePath();
+        responsePath.setInstructions(wayList);
+        responsePath.addPathDetails(details);
+        responsePath.setPoints(p.calcPoints());
 
         int numberOfPoints = p.calcPoints().size();
 
@@ -155,19 +154,19 @@ public class PathSimplificationTest {
         // Do not simplify anything
         douglasPeucker.setMaxDistance(0);
 
-        PathSimplification.simplify(pathWrapper, douglasPeucker, true);
+        PathSimplification.simplify(responsePath, douglasPeucker, true);
 
-        assertEquals(numberOfPoints, pathWrapper.getPoints().size());
+        assertEquals(numberOfPoints, responsePath.getPoints().size());
 
-        pathWrapper = new PathWrapper();
-        pathWrapper.setInstructions(wayList);
-        pathWrapper.addPathDetails(details);
-        pathWrapper.setPoints(p.calcPoints());
+        responsePath = new ResponsePath();
+        responsePath.setInstructions(wayList);
+        responsePath.addPathDetails(details);
+        responsePath.setPoints(p.calcPoints());
 
         douglasPeucker.setMaxDistance(100000000);
-        PathSimplification.simplify(pathWrapper, douglasPeucker, true);
+        PathSimplification.simplify(responsePath, douglasPeucker, true);
 
-        assertTrue(numberOfPoints > pathWrapper.getPoints().size());
+        assertTrue(numberOfPoints > responsePath.getPoints().size());
     }
 
     @Test

@@ -48,7 +48,12 @@ public interface ElevationProvider {
         }
 
         @Override
-        public void setCalcMean(boolean eleCalcMean) {
+        public void setInterpolate(boolean interpolate) {
+        }
+
+        @Override
+        public boolean getInterpolate() {
+            return false;
         }
     };
 
@@ -69,10 +74,16 @@ public interface ElevationProvider {
     ElevationProvider setDAType(DAType daType);
 
     /**
-     * Configuration option to include surrounding elevation points when fetching the elevation. Has
-     * only an effect if called before the first getEle call. Turned off by default.
+     * Configuration option to use bilinear interpolation to find the elevation at a point from the
+     * surrounding elevation points. Has only an effect if called before the first getEle call.
+     * Turned off by default.
      */
-    void setCalcMean(boolean calcMean);
+    void setInterpolate(boolean interpolate);
+
+    /**
+     * Returns true if bilinear interpolation is enabled.
+     */
+    boolean getInterpolate();
 
     /**
      * Release resources.

@@ -3,38 +3,50 @@ package com.graphhopper.resources;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.graphhopper.GraphHopper;
-import com.graphhopper.http.WebHelper;
+import com.graphhopper.config.Profile;
+import com.graphhopper.http.GHPointParam;
 import com.graphhopper.isochrone.algorithm.ContourBuilder;
-import com.graphhopper.isochrone.algorithm.Isochrone;
-import com.graphhopper.json.geo.JsonFeature;
+import com.graphhopper.isochrone.algorithm.ShortestPathTree;
+import com.graphhopper.isochrone.algorithm.Triangulator;
+import com.graphhopper.jackson.ResponsePathSerializer;
+import com.graphhopper.routing.ProfileResolver;
+import com.graphhopper.routing.ev.BooleanEncodedValue;
+import com.graphhopper.routing.ev.Subnetwork;
 import com.graphhopper.routing.querygraph.QueryGraph;
-import com.graphhopper.routing.util.*;
+import com.graphhopper.routing.util.DefaultSnapFilter;
+import com.graphhopper.routing.util.FiniteWeightFilter;
+import com.graphhopper.routing.util.TraversalMode;
+import com.graphhopper.routing.weighting.BlockAreaWeighting;
 import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.GraphEdgeIdFinder;
 import com.graphhopper.storage.index.LocationIndex;
-import com.graphhopper.storage.index.QueryResult;
-import com.graphhopper.util.StopWatch;
-import com.graphhopper.util.shapes.GHPoint;
+import com.graphhopper.storage.index.Snap;
+import com.graphhopper.util.*;
+import io.dropwizard.jersey.params.IntParam;
+import io.dropwizard.jersey.params.LongParam;
+import org.hibernate.validator.constraints.Range;
 import org.locationtech.jts.geom.*;
-import org.locationtech.jts.triangulate.ConformingDelaunayTriangulator;
-import org.locationtech.jts.triangulate.ConstraintVertex;
-import org.locationtech.jts.triangulate.quadedge.QuadEdgeSubdivision;
-import org.locationtech.jts.triangulate.quadedge.Vertex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
+import javax.validation.constraints.NotNull;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
+import java.util.function.ToDoubleFunction;
 
-import static com.graphhopper.routing.weighting.TurnCostProvider.NO_TURN_COST_PROVIDER;
+import static com.graphhopper.resources.IsochroneResource.ResponseType.geojson;
+import static com.graphhopper.resources.RouteResource.errorIfLegacyParameters;
+import static com.graphhopper.resources.RouteResource.removeLegacyParameters;
+import static com.graphhopper.routing.util.TraversalMode.EDGE_BASED;
+import static com.graphhopper.routing.util.TraversalMode.NODE_BASED;
 
 @Path("isochrone")
 public class IsochroneResource {
@@ -42,140 +54,133 @@ public class IsochroneResource {
     private static final Logger logger = LoggerFactory.getLogger(IsochroneResource.class);
 
     private final GraphHopper graphHopper;
-    private final EncodingManager encodingManager;
-    private final GeometryFactory geometryFactory = new GeometryFactory();
+    private final Triangulator triangulator;
+    private final ProfileResolver profileResolver;
 
     @Inject
-    public IsochroneResource(GraphHopper graphHopper, EncodingManager encodingManager) {
+    public IsochroneResource(GraphHopper graphHopper, Triangulator triangulator, ProfileResolver profileResolver) {
         this.graphHopper = graphHopper;
-        this.encodingManager = encodingManager;
+        this.triangulator = triangulator;
+        this.profileResolver = profileResolver;
     }
 
+    public enum ResponseType {json, geojson}
+
     @GET
-    @Produces({MediaType.APPLICATION_JSON})
+    @Produces(MediaType.APPLICATION_JSON)
     public Response doGet(
             @Context UriInfo uriInfo,
-            @QueryParam("vehicle") @DefaultValue("car") String vehicle,
-            @QueryParam("buckets") @DefaultValue("1") int nBuckets,
+            @QueryParam("profile") String profileName,
+            @QueryParam("buckets") @Range(min = 1, max = 20) @DefaultValue("1") IntParam nBuckets,
             @QueryParam("reverse_flow") @DefaultValue("false") boolean reverseFlow,
-            @QueryParam("point") GHPoint point,
-            @QueryParam("time_limit") @DefaultValue("600") long timeLimitInSeconds,
-            @QueryParam("distance_limit") @DefaultValue("-1") double distanceInMeter,
-            @QueryParam("type") @DefaultValue("json") String respType) {
-
-        if (nBuckets > 20 || nBuckets < 1)
-            throw new IllegalArgumentException("Number of buckets has to be in the range [1, 20]");
-
-        if (point == null)
-            throw new IllegalArgumentException("point parameter cannot be null");
-
+            @QueryParam("point") @NotNull GHPointParam point,
+            @QueryParam("time_limit") @DefaultValue("600") LongParam timeLimitInSeconds,
+            @QueryParam("distance_limit") @DefaultValue("-1") LongParam distanceLimitInMeter,
+            @QueryParam("weight_limit") @DefaultValue("-1") LongParam weightLimit,
+            @QueryParam("type") @DefaultValue("json") ResponseType respType,
+            @QueryParam("tolerance") @DefaultValue("0") double toleranceInMeter,
+            @QueryParam("full_geometry") @DefaultValue("false") boolean fullGeometry) {
         StopWatch sw = new StopWatch().start();
-
-        if (!encodingManager.hasEncoder(vehicle))
-            throw new IllegalArgumentException("vehicle not supported:" + vehicle);
-
-        if (respType != null && !respType.equalsIgnoreCase("json") && !respType.equalsIgnoreCase("geojson")) {
-            throw new IllegalArgumentException("Format not supported:" + respType);
-        }
-
-        FlagEncoder encoder = encodingManager.getEncoder(vehicle);
-        EdgeFilter edgeFilter = DefaultEdgeFilter.allEdges(encoder);
-        LocationIndex locationIndex = graphHopper.getLocationIndex();
-        QueryResult qr = locationIndex.findClosest(point.lat, point.lon, edgeFilter);
-        if (!qr.isValid())
-            throw new IllegalArgumentException("Point not found:" + point);
-
-        Graph graph = graphHopper.getGraphHopperStorage();
-        QueryGraph queryGraph = QueryGraph.lookup(graph, qr);
-
-        HintsMap hintsMap = new HintsMap();
+        PMap hintsMap = new PMap();
         RouteResource.initHints(hintsMap, uriInfo.getQueryParameters());
+        hintsMap.putObject(Parameters.CH.DISABLE, true);
+        hintsMap.putObject(Parameters.Landmark.DISABLE, true);
+        if (Helper.isEmpty(profileName)) {
+            profileName = profileResolver.resolveProfile(hintsMap).getName();
+            removeLegacyParameters(hintsMap);
+        }
+        errorIfLegacyParameters(hintsMap);
 
-        // todo: isochrones with turn costs ?
-        Weighting weighting = graphHopper.createWeighting(hintsMap, encoder, NO_TURN_COST_PROVIDER);
-        Isochrone isochrone = new Isochrone(queryGraph, weighting, reverseFlow);
+        Profile profile = graphHopper.getProfile(profileName);
+        if (profile == null)
+            throw new IllegalArgumentException("The requested profile '" + profileName + "' does not exist");
+        LocationIndex locationIndex = graphHopper.getLocationIndex();
+        Graph graph = graphHopper.getGraphHopperStorage();
+        Weighting weighting = graphHopper.createWeighting(profile, hintsMap);
+        BooleanEncodedValue inSubnetworkEnc = graphHopper.getEncodingManager().getBooleanEncodedValue(Subnetwork.key(profileName));
+        if (hintsMap.has(Parameters.Routing.BLOCK_AREA)) {
+            GraphEdgeIdFinder.BlockArea blockArea = GraphEdgeIdFinder.createBlockArea(graph, locationIndex,
+                    Collections.singletonList(point.get()), hintsMap, new FiniteWeightFilter(weighting));
+            weighting = new BlockAreaWeighting(weighting, blockArea);
+        }
+        Snap snap = locationIndex.findClosest(point.get().lat, point.get().lon, new DefaultSnapFilter(weighting, inSubnetworkEnc));
+        if (!snap.isValid())
+            throw new IllegalArgumentException("Point not found:" + point);
+        QueryGraph queryGraph = QueryGraph.create(graph, snap);
+        TraversalMode traversalMode = profile.isTurnCosts() ? EDGE_BASED : NODE_BASED;
+        ShortestPathTree shortestPathTree = new ShortestPathTree(queryGraph, weighting, reverseFlow, traversalMode);
 
-        if (distanceInMeter > 0) {
-            isochrone.setDistanceLimit(distanceInMeter);
+        double limit;
+        if (weightLimit.get() > 0) {
+            limit = weightLimit.get();
+            shortestPathTree.setWeightLimit(limit + Math.max(limit * 0.14, 2_000));
+        } else if (distanceLimitInMeter.get() > 0) {
+            limit = distanceLimitInMeter.get();
+            shortestPathTree.setDistanceLimit(limit + Math.max(limit * 0.14, 2_000));
         } else {
-            isochrone.setTimeLimit(timeLimitInSeconds);
+            limit = timeLimitInSeconds.get() * 1000;
+            shortestPathTree.setTimeLimit(limit + Math.max(limit * 0.14, 200_000));
+        }
+        ArrayList<Double> zs = new ArrayList<>();
+        double delta = limit / nBuckets.get();
+        for (int i = 0; i < nBuckets.get(); i++) {
+            zs.add((i + 1) * delta);
         }
 
-        List<List<Coordinate>> buckets = isochrone.searchGPS(qr.getClosestNode(), nBuckets);
-        if (isochrone.getVisitedNodes() > graphHopper.getMaxVisitedNodes() / 5) {
-            throw new IllegalArgumentException("Too many nodes would have to explored (" + isochrone.getVisitedNodes() + "). Let us know if you need this increased.");
+        ToDoubleFunction<ShortestPathTree.IsoLabel> fz;
+        if (weightLimit.get() > 0) {
+            fz = l -> l.weight;
+        } else if (distanceLimitInMeter.get() > 0) {
+            fz = l -> l.distance;
+        } else {
+            fz = l -> l.time;
         }
 
+        Triangulator.Result result = triangulator.triangulate(snap, queryGraph, shortestPathTree, fz, degreesFromMeters(toleranceInMeter));
+
+        ContourBuilder contourBuilder = new ContourBuilder(result.triangulation);
+        ArrayList<Geometry> isochrones = new ArrayList<>();
+        for (Double z : zs) {
+            logger.info("Building contour z={}", z);
+            MultiPolygon isochrone = contourBuilder.computeIsoline(z, result.seedEdges);
+            if (!isochrone.isEmpty()) {
+                if (fullGeometry) {
+                    isochrones.add(isochrone);
+                } else {
+                    Polygon maxPolygon = heuristicallyFindMainConnectedComponent(isochrone, isochrone.getFactory().createPoint(new Coordinate(point.get().lon, point.get().lat)));
+                    isochrones.add(isochrone.getFactory().createPolygon(((LinearRing) maxPolygon.getExteriorRing())));
+                }
+            }
+        }
         ArrayList<JsonFeature> features = new ArrayList<>();
-        Collection<ConstraintVertex> sites = new ArrayList<>();
-        for (int i = 0; i < buckets.size(); i++) {
-            List<Coordinate> level = buckets.get(i);
-            for (Coordinate coord : level) {
-                ConstraintVertex site = new ConstraintVertex(coord);
-                site.setZ(i);
-                sites.add(site);
-            }
-        }
-
-        ConformingDelaunayTriangulator conformingDelaunayTriangulator = new ConformingDelaunayTriangulator(sites, 0.0);
-        conformingDelaunayTriangulator.setConstraints(new ArrayList(), new ArrayList());
-        conformingDelaunayTriangulator.formInitialDelaunay();
-        conformingDelaunayTriangulator.enforceConstraints();
-        Geometry convexHull = conformingDelaunayTriangulator.getConvexHull();
-
-        // If there's only one site (and presumably also if the convex hull is otherwise degenerated),
-        // the triangulation only contains the frame, and not the site within the frame. Not sure if I agree with that.
-        // See ConformingDelaunayTriangulator, it does include a buffer for the frame, but that buffer is zero
-        // in these cases.
-        // It leads to the following follow-up defect:
-        // computeIsoline fails (returns an empty Multipolygon). This is clearly wrong, since
-        // the idea is that every real (non-frame) vertex has positive-length-edges around it that can be traversed
-        // to get a non-empty polygon.
-        // So we exclude this case for now (it is indeed only a corner-case).
-
-        if (!(convexHull instanceof Polygon)) {
-            throw new IllegalArgumentException("Too few points found. "
-                    + "Please try a different 'point' or a larger 'time_limit'.");
-        }
-
-        QuadEdgeSubdivision tin = conformingDelaunayTriangulator.getSubdivision();
-        for (Vertex vertex : (Collection<Vertex>) tin.getVertices(true)) {
-            if (tin.isFrameVertex(vertex)) {
-                vertex.setZ(Double.MAX_VALUE);
-            }
-        }
-        ArrayList<Coordinate[]> polygonShells = new ArrayList<>();
-        ContourBuilder contourBuilder = new ContourBuilder(tin);
-        for (int i = 0; i < buckets.size() - 1; i++) {
-            MultiPolygon multiPolygon = contourBuilder.computeIsoline((double) i + 0.5);
-            Polygon maxPolygon = heuristicallyFindMainConnectedComponent(multiPolygon, geometryFactory.createPoint(new Coordinate(point.lon, point.lat)));
-            polygonShells.add(maxPolygon.getExteriorRing().getCoordinates());
-        }
-        for (Coordinate[] polygonShell : polygonShells) {
+        for (Geometry isochrone : isochrones) {
             JsonFeature feature = new JsonFeature();
             HashMap<String, Object> properties = new HashMap<>();
             properties.put("bucket", features.size());
-            if (respType.equalsIgnoreCase("geojson")) {
-                properties.put("copyrights", WebHelper.COPYRIGHTS);
+            if (respType == geojson) {
+                properties.put("copyrights", ResponsePathSerializer.COPYRIGHTS);
             }
             feature.setProperties(properties);
-            feature.setGeometry(geometryFactory.createPolygon(polygonShell));
+            feature.setGeometry(isochrone);
             features.add(feature);
         }
         ObjectNode json = JsonNodeFactory.instance.objectNode();
 
+        sw.stop();
         ObjectNode finalJson = null;
-        if (respType.equalsIgnoreCase("geojson")) {
+        if (respType == geojson) {
             json.put("type", "FeatureCollection");
             json.putPOJO("features", features);
             finalJson = json;
         } else {
             json.putPOJO("polygons", features);
-            finalJson = WebHelper.jsonResponsePutInfo(json, sw.getSeconds());
+            final ObjectNode info = json.putObject("info");
+            info.putPOJO("copyrights", ResponsePathSerializer.COPYRIGHTS);
+            info.put("took", Math.round((float) sw.getMillis()));
+            finalJson = json;
         }
 
-        sw.stop();
-        logger.info("took: " + sw.getSeconds() + ", visited nodes:" + isochrone.getVisitedNodes() + ", " + uriInfo.getQueryParameters());
+        logger.info("took: " + sw.getSeconds() + ", visited nodes:" + shortestPathTree.getVisitedNodes());
         return Response.ok(finalJson).header("X-GH-Took", "" + sw.getSeconds() * 1000).
                 build();
     }
@@ -194,6 +199,17 @@ public class IsochroneResource {
             }
         }
         return maxPolygon;
+    }
+
+    /**
+     * We want to specify a tolerance in something like meters, but we need it in unprojected lat/lon-space.
+     * This is more correct in some parts of the world, and in some directions, than in others.
+     *
+     * @param distanceInMeters distance in meters
+     * @return "distance" in degrees
+     */
+    static double degreesFromMeters(double distanceInMeters) {
+        return distanceInMeters / DistanceCalcEarth.METERS_PER_DEGREE;
     }
 
 }

@@ -17,52 +17,51 @@
  */
 package com.graphhopper.routing.util.spatialrules;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
-import org.locationtech.jts.geom.Coordinate;
-import org.locationtech.jts.geom.Envelope;
-import org.locationtech.jts.geom.GeometryFactory;
-import org.locationtech.jts.geom.Point;
-import org.locationtech.jts.geom.Polygon;
+import org.locationtech.jts.geom.*;
 import org.locationtech.jts.index.strtree.STRtree;
-
-import com.graphhopper.util.shapes.GHPoint;
 
 /**
  * @author Thomas Butz
  */
 public class SpatialRuleLookupJTS implements SpatialRuleLookup {
     
+    private static final Comparator<SpatialRule> RULE_COMP = new Comparator<SpatialRule>() {
+
+        @Override
+        public int compare(SpatialRule o1, SpatialRule o2) {
+            int comp = Integer.compare(o1.getPriority(), o2.getPriority());
+            if (comp != 0) {
+                return comp;
+            }
+            
+            return o1.getId().compareTo(o2.getId());
+        }
+    };
+    
     private final GeometryFactory geometryFactory = new GeometryFactory();
     private final List<SpatialRule> rules;
     private final Envelope maxBounds;
     private final STRtree index;
     
-    public SpatialRuleLookupJTS(List<SpatialRule> spatialRules, Envelope maxBounds) {
+    public SpatialRuleLookupJTS(List<SpatialRule> spatialRules) {
         this.index = new STRtree();
+        this.maxBounds = new Envelope();
         
         Map<Polygon, SpatialRuleContainer> containerMap = new HashMap<>();
+        List<SpatialRule> registeredRules = new ArrayList<>();
         Set<String> ruleIDs = new HashSet<>();
         for (SpatialRule rule : spatialRules) {
             if (rule == null)
                 throw new IllegalArgumentException("rule cannot be null");
-
-            if (rule.equals(SpatialRule.EMPTY))
-                throw new IllegalArgumentException("rule cannot be EMPTY");
             
             if (!ruleIDs.add(rule.getId()))
                 throw new IllegalArgumentException("Duplicate rule ID: \"" + rule.getId() + "\"");
             
+            boolean registered = false;
             for (Polygon border : rule.getBorders()) {
                 Envelope borderEnvelope = border.getEnvelopeInternal();
-                if (!maxBounds.intersects(borderEnvelope)) {
-                    continue;
-                }
                 
                 SpatialRuleContainer container = containerMap.get(border);
                 if (container == null) {
@@ -71,21 +70,24 @@ public class SpatialRuleLookupJTS implements SpatialRuleLookup {
                     index.insert(borderEnvelope, container);
                 }
                 container.addRule(rule);
+                maxBounds.expandToInclude(borderEnvelope);
+                registered = true;
+            }
+            
+            if (registered) {
+                registeredRules.add(rule);
             }
         }
 
         index.build();
 
-        this.rules = new ArrayList<>();
-        rules.add(SpatialRule.EMPTY);
-        rules.addAll(spatialRules);
-        this.maxBounds = maxBounds;
+        this.rules = Collections.unmodifiableList(registeredRules);
     }
 
     @Override
-    public SpatialRule lookupRule(double lat, double lon) {
+    public SpatialRuleSet lookupRules(double lat, double lon) {
         if (!maxBounds.covers(lon, lat)) {
-            return SpatialRule.EMPTY;
+            return SpatialRuleSet.EMPTY;
         }
 
         Envelope searchEnv = new Envelope(lon, lon, lat, lat);
@@ -94,43 +96,31 @@ public class SpatialRuleLookupJTS implements SpatialRuleLookup {
         List<SpatialRuleContainer> containers = index.query(searchEnv);
         
         if (containers.isEmpty()) {
-            return SpatialRule.EMPTY;
+            return SpatialRuleSet.EMPTY;
         }
         
         Point point = geometryFactory.createPoint(new Coordinate(lon, lat));
         List<SpatialRule> applicableRules = new ArrayList<>();
         for (SpatialRuleContainer container : containers) {
-            if (container.containsProperly(point)) {
+            if (container.covers(point)) {
                 applicableRules.addAll(container.getRules());
             }
         }
         
         if (applicableRules.isEmpty()) {
-            return SpatialRule.EMPTY;
+            return SpatialRuleSet.EMPTY;
         }
-
-        //TODO support multiple rules
-        return applicableRules.get(0);
-    }
-
-    @Override
-    public SpatialRule lookupRule(GHPoint point) {
-        return lookupRule(point.lat, point.lon);
+        
+        Collections.sort(applicableRules, RULE_COMP);
+        
+        int spatialId = rules.indexOf(applicableRules.get(applicableRules.size() - 1)) + 1;
+        
+        return new SpatialRuleSet(applicableRules, spatialId);
     }
     
     @Override
-    public int getSpatialId(SpatialRule rule) {
-        return rules.indexOf(rule);
-    }
-    
-    @Override
-    public SpatialRule getSpatialRule(int spatialId) {
-        return rules.get(spatialId);
-    }
-
-    @Override
-    public int size() {
-        return rules.size();
+    public List<SpatialRule> getRules() {
+        return rules;
     }
 
     @Override

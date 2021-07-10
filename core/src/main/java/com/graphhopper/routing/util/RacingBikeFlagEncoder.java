@@ -18,12 +18,11 @@
 package com.graphhopper.routing.util;
 
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.PMap;
 
 import java.util.TreeMap;
 
-import static com.graphhopper.routing.profiles.RouteNetwork.*;
+import static com.graphhopper.routing.ev.RouteNetwork.*;
 import static com.graphhopper.routing.util.PriorityCode.*;
 
 /**
@@ -38,17 +37,15 @@ public class RacingBikeFlagEncoder extends BikeCommonFlagEncoder {
     }
 
     public RacingBikeFlagEncoder(PMap properties) {
-        this((int) properties.getLong("speed_bits", 4),
+        this(properties.getInt("speed_bits", 4),
                 properties.getDouble("speed_factor", 2),
                 properties.getBool("turn_costs", false) ? 1 : 0);
-        this.setBlockFords(properties.getBool("block_fords", false));
+
+        blockPrivate(properties.getBool("block_private", true));
+        blockFords(properties.getBool("block_fords", false));
     }
 
-    public RacingBikeFlagEncoder(String propertiesStr) {
-        this(new PMap(propertiesStr));
-    }
-
-    public RacingBikeFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
+    protected RacingBikeFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
         super(speedBits, speedFactor, maxTurnCosts);
         preferHighwayTags.add("road");
         preferHighwayTags.add("secondary");
@@ -115,12 +112,23 @@ public class RacingBikeFlagEncoder extends BikeCommonFlagEncoder {
         addPushingSection("pedestrian");
         addPushingSection("steps");
 
+        setSmoothnessSpeedFactor(com.graphhopper.routing.ev.Smoothness.EXCELLENT, 1.2d);
+        setSmoothnessSpeedFactor(com.graphhopper.routing.ev.Smoothness.GOOD, 1.0d);
+        setSmoothnessSpeedFactor(com.graphhopper.routing.ev.Smoothness.INTERMEDIATE, 0.9d);
+        setSmoothnessSpeedFactor(com.graphhopper.routing.ev.Smoothness.BAD, 0.7d);
+        setSmoothnessSpeedFactor(com.graphhopper.routing.ev.Smoothness.VERY_BAD, smoothnessFactorPushingSectionThreshold);
+        setSmoothnessSpeedFactor(com.graphhopper.routing.ev.Smoothness.HORRIBLE, smoothnessFactorPushingSectionThreshold);
+        setSmoothnessSpeedFactor(com.graphhopper.routing.ev.Smoothness.VERY_HORRIBLE, smoothnessFactorPushingSectionThreshold);
+        setSmoothnessSpeedFactor(com.graphhopper.routing.ev.Smoothness.IMPASSABLE, smoothnessFactorPushingSectionThreshold);
+
         routeMap.put(INTERNATIONAL, BEST.getValue());
         routeMap.put(NATIONAL, BEST.getValue());
         routeMap.put(REGIONAL, VERY_NICE.getValue());
         routeMap.put(LOCAL, UNCHANGED.getValue());
 
-        absoluteBarriers.add("kissing_gate");
+        blockByDefaultBarriers.add("kissing_gate");
+        blockByDefaultBarriers.add("stile");
+        blockByDefaultBarriers.add("turnstile");
 
         setAvoidSpeedLimit(81);
         setSpecificClassBicycle("roadcycling");
@@ -138,19 +146,8 @@ public class RacingBikeFlagEncoder extends BikeCommonFlagEncoder {
             if ("grade1".equals(trackType))
                 weightToPrioMap.put(110d, PREFER.getValue());
             else if (trackType == null || trackType.startsWith("grade"))
-                weightToPrioMap.put(110d, AVOID_AT_ALL_COSTS.getValue());
+                weightToPrioMap.put(110d, AVOID_MORE.getValue());
         }
-    }
-
-    @Override
-    boolean isSacScaleAllowed(String sacScale) {
-        // for racing bike it is only allowed if empty
-        return false;
-    }
-
-    @Override
-    public int getVersion() {
-        return 2;
     }
 
     @Override

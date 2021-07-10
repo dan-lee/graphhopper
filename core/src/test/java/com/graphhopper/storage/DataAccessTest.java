@@ -19,14 +19,14 @@ package com.graphhopper.storage;
 
 import com.graphhopper.util.BitUtil;
 import com.graphhopper.util.Helper;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.nio.ByteOrder;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * @author Peter Karich
@@ -39,7 +39,7 @@ public abstract class DataAccessTest {
 
     public abstract DataAccess createDataAccess(String location);
 
-    @Before
+    @BeforeEach
     public void setUp() {
         if (!Helper.removeDir(folder))
             throw new IllegalStateException("cannot delete folder " + folder);
@@ -48,7 +48,7 @@ public abstract class DataAccessTest {
         directory = folder.getAbsolutePath() + "/";
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         Helper.removeDir(folder);
     }
@@ -197,70 +197,6 @@ public abstract class DataAccessTest {
         assertTrue(da.loadExisting());
         assertEquals(olds, da.getSegments());
         assertEquals(321, da.getInt(400));
-        da.close();
-    }
-
-    @Test
-    public void testTrimTo() {
-        DataAccess da = createDataAccess(name);
-        da.setSegmentSize(128);
-        da.create(128 * 11);
-        da.setInt(1 * 4, 10);
-        da.setInt(27 * 4, 200);
-        da.setInt(31 * 4, 301);
-        da.setInt(32 * 4, 302);
-        da.setInt(337 * 4, 4000);
-
-        // now 11 segments: (337 + 1) * 4 = 1352
-        assertEquals(11, da.getSegments());
-        assertEquals(11 * 128, da.getCapacity());
-
-        // now 3 segments
-        da.trimTo(128 * 2 + 1);
-        assertEquals(3, da.getSegments());
-
-        // now 2 segments
-        da.trimTo(128 * 2);
-        assertEquals(2, da.getSegments());
-        assertEquals(301, da.getInt(31 * 4));
-        assertEquals(302, da.getInt(32 * 4));
-
-        // now only one segment
-        da.trimTo(128 * 1);
-        assertEquals(1, da.getSegments());
-        assertEquals(301, da.getInt(31 * 4));
-
-        // at least one segment
-        da.trimTo(0);
-        assertEquals(1, da.getSegments());
-        da.close();
-    }
-
-    @Test
-    public void testBoundsCheck() {
-        DataAccess da = createDataAccess(name);
-        da.setSegmentSize(128);
-        da.create(128 * 11);
-        da.setInt(32 * 4, 302);
-
-        // make smaller
-        da.trimTo(128 * 1);
-        try {
-            assertEquals(302, da.getInt(32 * 4));
-            assertTrue(false);
-        } catch (Exception ex) {
-        }
-        da.close();
-
-        da = createDataAccess(name);
-        da.create(128);
-        da.setInt(31 * 4, 200);
-        try {
-            // this should fail with an index out of bounds exception
-            da.setInt(32 * 4, 220);
-            assertFalse(true);
-        } catch (Exception ex) {
-        }
         da.close();
     }
 

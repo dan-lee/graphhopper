@@ -12,9 +12,8 @@ The default import is done via OSMReader which imports OpenStreetMap data. You c
 or use the `graphhopper.sh` script which utilizes the config.yml where you can specify if it should 
 read `car`, `foot` or all vehicles at once. You'll have to make sure that you allocate enough memory for your 
 specific graph (E.g. ~2GB for Germany) e.g. `export JAVA_OPTS="-Xmx2g"`. The import process is fast e.g. 
-complete Germany takes roughly 10 minutes. Additionally it will take time if you choose 
-`prepare.ch.weightings=fastest` in the config.yml which will dramatically improve query time
-but requires more RAM on import.
+complete Germany takes roughly 10 minutes. Additionally it will take time if you enable speed mode by using 
+`profiles_ch` in the config.yml which will dramatically improve query time but requires more RAM for the import.
 
 ### 2. The Graph
 
@@ -80,8 +79,7 @@ To get the coordinate from an address you will need a geocoding solution not par
 To get the closest node or edge id from a coordinate we provide you with an efficient lookup concept:
 the LocationIndex. There are multiple implementations
 where the LocationIndexTree is the most precise and scalable one and used in almost all places.
-See [here](./location-index.md) for more information. See #17 and #221.
-
+See [here](../example/src/main/java/com/graphhopper/example/LocationIndexExample.java) for more information. See #17 and #221.
 
 ## 4.2 QueryGraph
 

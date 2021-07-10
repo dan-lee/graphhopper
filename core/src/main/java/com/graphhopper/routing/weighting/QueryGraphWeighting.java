@@ -21,7 +21,6 @@ package com.graphhopper.routing.weighting;
 import com.carrotsearch.hppc.IntArrayList;
 import com.graphhopper.routing.querygraph.QueryGraph;
 import com.graphhopper.routing.util.FlagEncoder;
-import com.graphhopper.routing.util.HintsMap;
 import com.graphhopper.util.EdgeIterator;
 import com.graphhopper.util.EdgeIteratorState;
 
@@ -96,6 +95,11 @@ public class QueryGraphWeighting implements Weighting {
     }
 
     @Override
+    public boolean hasTurnCosts() {
+        return weighting.hasTurnCosts();
+    }
+
+    @Override
     public FlagEncoder getFlagEncoder() {
         return weighting.getFlagEncoder();
     }
@@ -106,12 +110,12 @@ public class QueryGraphWeighting implements Weighting {
     }
 
     @Override
-    public boolean matches(HintsMap map) {
-        return weighting.matches(map);
+    public String toString() {
+        return getName();
     }
 
     private int getOriginalEdge(int edge) {
-        return closestEdges.get((edge - firstVirtualEdgeId) / 4);
+        return closestEdges.get((edge - firstVirtualEdgeId) / 2);
     }
 
     private boolean isVirtualNode(int node) {

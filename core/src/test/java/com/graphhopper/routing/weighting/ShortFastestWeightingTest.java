@@ -22,11 +22,11 @@ import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.GHUtility;
 import com.graphhopper.util.PMap;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import static com.graphhopper.util.GHUtility.createMockedEdgeIteratorState;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * @author Peter Karich
@@ -37,7 +37,7 @@ public class ShortFastestWeightingTest {
 
     @Test
     public void testShort() {
-        EdgeIteratorState edge = createMockedEdgeIteratorState(10, GHUtility.setProperties(encodingManager.createEdgeFlags(), encoder, 50, true, false));
+        EdgeIteratorState edge = createMockedEdgeIteratorState(10, GHUtility.setSpeed(50, 0, encoder, encodingManager.createEdgeFlags()));
         Weighting instance = new ShortFastestWeighting(encoder, 0.03);
         assertEquals(1.02, instance.calcEdgeWeight(edge, false), 1e-8);
 
@@ -49,7 +49,8 @@ public class ShortFastestWeightingTest {
     @Test
     public void testTooSmall() {
         try {
-            new ShortFastestWeighting(encoder, new PMap("short_fastest.distance_factor=0|short_fastest.time_factor=0"));
+            new ShortFastestWeighting(encoder, new PMap("short_fastest.distance_factor=0|short_fastest.time_factor=0"),
+                    TurnCostProvider.NO_TURN_COST_PROVIDER);
             fail();
         } catch (Exception ex) {
         }

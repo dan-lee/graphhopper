@@ -1,19 +1,22 @@
 package com.graphhopper.storage;
 
 import com.graphhopper.GraphHopper;
+import com.graphhopper.config.LMProfile;
+import com.graphhopper.config.Profile;
 import com.graphhopper.reader.ReaderWay;
+import com.graphhopper.routing.ev.Subnetwork;
 import com.graphhopper.routing.util.CarFlagEncoder;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.util.EncodingManager.Access;
+import com.graphhopper.util.GHUtility;
 import com.graphhopper.util.Helper;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.File;
-import java.util.Arrays;
 
 import static com.graphhopper.util.GHUtility.updateDistancesFor;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 public class GraphHopperStorageLMTest {
     @Test
@@ -21,7 +24,7 @@ public class GraphHopperStorageLMTest {
         String defaultGraphLoc = "./target/ghstorage_lm";
         Helper.removeDir(new File(defaultGraphLoc));
         CarFlagEncoder carFlagEncoder = new CarFlagEncoder();
-        EncodingManager encodingManager = EncodingManager.create(carFlagEncoder);
+        EncodingManager encodingManager = new EncodingManager.Builder().add(carFlagEncoder).add(Subnetwork.create("my_profile")).build();
         GraphHopperStorage graph = GraphBuilder.start(encodingManager).setRAM(defaultGraphLoc, true).create();
 
         // 0-1
@@ -29,7 +32,7 @@ public class GraphHopperStorageLMTest {
         way_0_1.setTag("highway", "primary");
         way_0_1.setTag("maxheight", "4.4");
 
-        graph.edge(0, 1, 1, true);
+        GHUtility.setSpeed(60, true, true, carFlagEncoder, graph.edge(0, 1).setDistance(1));
         updateDistancesFor(graph, 0, 0.00, 0.00);
         updateDistancesFor(graph, 1, 0.01, 0.01);
         graph.getEdgeIteratorState(0, 1).setFlags(
@@ -40,7 +43,7 @@ public class GraphHopperStorageLMTest {
         way_1_2.setTag("highway", "primary");
         way_1_2.setTag("maxweight", "45");
 
-        graph.edge(1, 2, 1, true);
+        GHUtility.setSpeed(60, true, true, carFlagEncoder, graph.edge(1, 2).setDistance(1));
         updateDistancesFor(graph, 2, 0.02, 0.02);
         graph.getEdgeIteratorState(1, 2).setFlags(
                 carFlagEncoder.handleWayTags(encodingManager.createEdgeFlags(), way_1_2, Access.WAY));
@@ -48,8 +51,10 @@ public class GraphHopperStorageLMTest {
         graph.flush();
         graph.close();
 
-        GraphHopper hopper = new GraphHopper().setGraphHopperLocation(defaultGraphLoc).setCHEnabled(false);
-        hopper.getLMPreparationHandler().setEnabled(true).setWeightingsAsStrings(Arrays.asList("fastest"));
+        GraphHopper hopper = new GraphHopper()
+                .setGraphHopperLocation(defaultGraphLoc)
+                .setProfiles(new Profile("my_profile").setVehicle("car").setWeighting("fastest"));
+        hopper.getLMPreparationHandler().setLMProfiles(new LMProfile("my_profile"));
         // does lm preparation
         hopper.importOrLoad();
         EncodingManager em = hopper.getEncodingManager();
@@ -57,8 +62,10 @@ public class GraphHopperStorageLMTest {
         assertEquals(1, em.fetchEdgeEncoders().size());
         assertEquals(16, hopper.getLMPreparationHandler().getLandmarks());
 
-        hopper = new GraphHopper().setGraphHopperLocation(defaultGraphLoc).setCHEnabled(false);
-        hopper.getLMPreparationHandler().setEnabled(true).setWeightingsAsStrings(Arrays.asList("fastest"));
+        hopper = new GraphHopper()
+                .setGraphHopperLocation(defaultGraphLoc)
+                .setProfiles(new Profile("my_profile").setVehicle("car").setWeighting("fastest"));
+        hopper.getLMPreparationHandler().setLMProfiles(new LMProfile("my_profile"));
         // just loads the LM data
         hopper.importOrLoad();
         assertEquals(1, em.fetchEdgeEncoders().size());

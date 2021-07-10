@@ -20,6 +20,7 @@ package com.graphhopper.routing.util;
 import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.EdgeIteratorState;
+import com.graphhopper.util.FetchMode;
 import com.graphhopper.util.PMap;
 import com.graphhopper.util.PointList;
 
@@ -36,23 +37,9 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder {
         this(new PMap());
     }
 
-    public Bike2WeightFlagEncoder(String propertiesStr) {
-        this(new PMap(propertiesStr));
-    }
-
     public Bike2WeightFlagEncoder(PMap properties) {
         super(properties);
         speedTwoDirections = true;
-    }
-
-    public Bike2WeightFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
-        super(speedBits, speedFactor, maxTurnCosts);
-        speedTwoDirections = true;
-    }
-
-    @Override
-    public int getVersion() {
-        return 3;
     }
 
     protected void handleSpeed(IntsRef edgeFlags, ReaderWay way, double speed) {
@@ -62,7 +49,7 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder {
 
     @Override
     public void applyWayTags(ReaderWay way, EdgeIteratorState edge) {
-        PointList pl = edge.fetchWayGeometry(3);
+        PointList pl = edge.fetchWayGeometry(FetchMode.ALL);
         if (!pl.is3D())
             throw new IllegalStateException(toString() + " requires elevation data to improve speed calculation based on it. Please enable it in config via e.g. graph.elevation.provider: srtm");
 
@@ -73,18 +60,18 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder {
             return;
 
         // Decrease the speed for ele increase (incline), and decrease the speed for ele decrease (decline). The speed-decrease
-        // has to be bigger (compared to the speed-increase) for the same elevation difference to simulate loosing energy and avoiding hills.
+        // has to be bigger (compared to the speed-increase) for the same elevation difference to simulate losing energy and avoiding hills.
         // For the reverse speed this has to be the opposite but again keeping in mind that up+down difference.
         double incEleSum = 0, incDist2DSum = 0, decEleSum = 0, decDist2DSum = 0;
-        // double prevLat = pl.getLatitude(0), prevLon = pl.getLongitude(0);
-        double prevEle = pl.getElevation(0);
+        // double prevLat = pl.getLat(0), prevLon = pl.getLon(0);
+        double prevEle = pl.getEle(0);
         double fullDist2D = edge.getDistance();
 
         // for short edges an incline makes no sense and for 0 distances could lead to NaN values for speed, see #432
         if (fullDist2D < 2)
             return;
 
-        double eleDelta = pl.getElevation(pl.size() - 1) - prevEle;
+        double eleDelta = pl.getEle(pl.size() - 1) - prevEle;
         if (eleDelta > 0.1) {
             incEleSum = eleDelta;
             incDist2DSum = fullDist2D;
@@ -102,7 +89,7 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder {
         double maxSpeed = getHighwaySpeed("cycleway");
         if (accessEnc.getBool(false, intsRef)) {
             // use weighted mean so that longer incline influences speed more than shorter
-            double speed = getSpeed(false, intsRef);
+            double speed = avgSpeedEnc.getDecimal(false, intsRef);
             double fwdFaster = 1 + 2 * keepIn(fwdDecline, 0, 0.2);
             fwdFaster = fwdFaster * fwdFaster;
             double fwdSlower = 1 - 5 * keepIn(fwdIncline, 0, 0.2);
@@ -112,7 +99,7 @@ public class Bike2WeightFlagEncoder extends BikeFlagEncoder {
         }
 
         if (accessEnc.getBool(true, intsRef)) {
-            double speedReverse = getSpeed(true, intsRef);
+            double speedReverse = avgSpeedEnc.getDecimal(true, intsRef);
             double bwFaster = 1 + 2 * keepIn(fwdIncline, 0, 0.2);
             bwFaster = bwFaster * bwFaster;
             double bwSlower = 1 - 5 * keepIn(fwdDecline, 0, 0.2);

@@ -1,14 +1,14 @@
 package com.graphhopper.routing.util.parsers;
 
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.routing.profiles.EnumEncodedValue;
-import com.graphhopper.routing.profiles.TrackType;
+import com.graphhopper.routing.ev.EnumEncodedValue;
+import com.graphhopper.routing.ev.TrackType;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.storage.IntsRef;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class OSMTrackTypeParserTest {
 
@@ -17,7 +17,7 @@ public class OSMTrackTypeParserTest {
     private EnumEncodedValue<TrackType> ttEnc;
     private OSMTrackTypeParser parser;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         parser = new OSMTrackTypeParser();
         em = new EncodingManager.Builder().add(parser).build();
@@ -60,7 +60,7 @@ public class OSMTrackTypeParserTest {
         IntsRef intsRef = em.createEdgeFlags();
         readerWay.setTag("tracktype", "unknownstuff");
         parser.handleWayTags(intsRef, readerWay, false, relFlags);
-        assertEquals(TrackType.OTHER, ttEnc.getEnum(false, intsRef));
+        assertEquals(TrackType.MISSING, ttEnc.getEnum(false, intsRef));
     }
 
     @Test
@@ -68,6 +68,6 @@ public class OSMTrackTypeParserTest {
         ReaderWay readerWay = new ReaderWay(1);
         IntsRef intsRef = em.createEdgeFlags();
         parser.handleWayTags(intsRef, readerWay, false, relFlags);
-        assertEquals(TrackType.OTHER, ttEnc.getEnum(false, intsRef));
+        assertEquals(TrackType.MISSING, ttEnc.getEnum(false, intsRef));
     }
 }

@@ -20,12 +20,12 @@ package com.graphhopper.routing.util;
 import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.PMap;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.text.DateFormat;
 import java.util.Date;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Peter Karich
@@ -33,6 +33,7 @@ import static org.junit.Assert.assertTrue;
  */
 public class Car4WDFlagEncoderTest extends CarFlagEncoderTest {
 
+    @Override
     CarFlagEncoder createEncoder() {
         return new Car4WDFlagEncoder(new PMap("speed_two_directions=true|block_fords=true"));
     }

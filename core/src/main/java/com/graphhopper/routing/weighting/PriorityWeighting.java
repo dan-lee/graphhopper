@@ -17,7 +17,7 @@
  */
 package com.graphhopper.routing.weighting;
 
-import com.graphhopper.routing.profiles.DecimalEncodedValue;
+import com.graphhopper.routing.ev.DecimalEncodedValue;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.routing.util.PriorityCode;
@@ -25,7 +25,6 @@ import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.PMap;
 
 import static com.graphhopper.routing.util.PriorityCode.BEST;
-import static com.graphhopper.routing.weighting.TurnCostProvider.NO_TURN_COST_PROVIDER;
 
 /**
  * Special weighting for (motor)bike
@@ -35,17 +34,14 @@ import static com.graphhopper.routing.weighting.TurnCostProvider.NO_TURN_COST_PR
 public class PriorityWeighting extends FastestWeighting {
 
     private final double minFactor;
+    private final double maxPrio;
     private final DecimalEncodedValue priorityEnc;
-
-    public PriorityWeighting(FlagEncoder encoder, PMap pMap) {
-        this(encoder, pMap, NO_TURN_COST_PROVIDER);
-    }
 
     public PriorityWeighting(FlagEncoder encoder, PMap pMap, TurnCostProvider turnCostProvider) {
         super(encoder, pMap, turnCostProvider);
         priorityEnc = encoder.getDecimalEncodedValue(EncodingManager.getKey(encoder, "priority"));
-        double maxPriority = PriorityCode.getFactor(BEST.getValue());
-        minFactor = 1 / (0.5 + maxPriority);
+        minFactor = 1 / PriorityCode.getValue(BEST.getValue());
+        maxPrio = PriorityCode.getFactor(BEST.getValue());
     }
 
     @Override
@@ -58,6 +54,9 @@ public class PriorityWeighting extends FastestWeighting {
         double weight = super.calcEdgeWeight(edgeState, reverse);
         if (Double.isInfinite(weight))
             return Double.POSITIVE_INFINITY;
-        return weight / (0.5 + edgeState.get(priorityEnc));
+        double priority = edgeState.get(priorityEnc);
+        if (priority > maxPrio)
+            throw new IllegalArgumentException("priority cannot be bigger than " + maxPrio + " but was " + priority);
+        return weight / priority;
     }
 }

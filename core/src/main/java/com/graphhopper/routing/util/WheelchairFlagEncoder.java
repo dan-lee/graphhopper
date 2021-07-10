@@ -20,6 +20,7 @@ package com.graphhopper.routing.util;
 import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.EdgeIteratorState;
+import com.graphhopper.util.FetchMode;
 import com.graphhopper.util.PMap;
 import com.graphhopper.util.PointList;
 
@@ -27,7 +28,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.TreeMap;
 
-import static com.graphhopper.routing.util.PriorityCode.REACH_DEST;
+import static com.graphhopper.routing.util.PriorityCode.AVOID;
 import static com.graphhopper.routing.util.PriorityCode.VERY_NICE;
 
 /**
@@ -49,22 +50,24 @@ public class WheelchairFlagEncoder extends FootFlagEncoder {
     }
 
     public WheelchairFlagEncoder(PMap properties) {
-        this((int) properties.getLong("speed_bits", 4),
-                properties.getDouble("speed_factor", 1));
-        this.setBlockFords(properties.getBool("block_fords", false));
+        this(properties.getInt("speed_bits", 4), properties.getDouble("speed_factor", 1));
+
+        blockPrivate(properties.getBool("block_private", true));
+        blockFords(properties.getBool("block_fords", false));
     }
 
-    public WheelchairFlagEncoder(int speedBits, double speedFactor) {
+    protected WheelchairFlagEncoder(int speedBits, double speedFactor) {
         super(speedBits, speedFactor);
-        restrictions.add("wheelchair");
 
-        setBlockByDefault(false);
-        absoluteBarriers.add("handrail");
-        absoluteBarriers.add("wall");
-        absoluteBarriers.add("turnstile");
-        potentialBarriers.add("kerb");
-        potentialBarriers.add("cattle_grid");
-        potentialBarriers.add("motorcycle_barrier");
+        restrictions.add("wheelchair");
+        blockByDefaultBarriers.add("handrail");
+        blockByDefaultBarriers.add("wall");
+        blockByDefaultBarriers.add("turnstile");
+        blockByDefaultBarriers.add("kissing_gate");
+        blockByDefaultBarriers.add("stile");
+        passByDefaultBarriers.add("kerb");
+        passByDefaultBarriers.add("cattle_grid");
+        passByDefaultBarriers.add("motorcycle_barrier");
 
         safeHighwayTags.add("footway");
         safeHighwayTags.add("pedestrian");
@@ -100,13 +103,7 @@ public class WheelchairFlagEncoder extends FootFlagEncoder {
         allowedHighwayTags.add("road");
 
         maxPossibleSpeed = FERRY_SPEED;
-        speedDefault = MEAN_SPEED;
         speedTwoDirections = true;
-    }
-
-    @Override
-    public int getVersion() {
-        return 1;
     }
 
     /**
@@ -201,7 +198,7 @@ public class WheelchairFlagEncoder extends FootFlagEncoder {
         if (!access.isFerry()) {
             setSpeed(edgeFlags, true, true, MEAN_SPEED);
         } else {
-            double ferrySpeed = getFerrySpeed(way);
+            double ferrySpeed = ferrySpeedCalc.getSpeed(way);
             setSpeed(edgeFlags, true, true, ferrySpeed);
         }
 
@@ -215,9 +212,9 @@ public class WheelchairFlagEncoder extends FootFlagEncoder {
      */
     @Override
     public void applyWayTags(ReaderWay way, EdgeIteratorState edge) {
-        PointList pl = edge.fetchWayGeometry(3);
+        PointList pl = edge.fetchWayGeometry(FetchMode.ALL);
 
-        double prevEle = pl.getElevation(0);
+        double prevEle = pl.getEle(0);
         double fullDist2D = edge.getDistance();
 
         if (Double.isInfinite(fullDist2D)) {
@@ -228,7 +225,7 @@ public class WheelchairFlagEncoder extends FootFlagEncoder {
             return;
         }
 
-        double eleDelta = pl.getElevation(pl.size() - 1) - prevEle;
+        double eleDelta = pl.getEle(pl.size() - 1) - prevEle;
         double elePercent = eleDelta / fullDist2D * 100;
         int smallInclinePercent = 3;
         if (elePercent > smallInclinePercent && elePercent < maxInclinePercent) {
@@ -271,7 +268,7 @@ public class WheelchairFlagEncoder extends FootFlagEncoder {
         if (way.hasTag("wheelchair", "designated")) {
             weightToPrioMap.put(102d, VERY_NICE.getValue());
         } else if (way.hasTag("wheelchair", "limited")) {
-            weightToPrioMap.put(102d, REACH_DEST.getValue());
+            weightToPrioMap.put(102d, AVOID.getValue());
         }
 
         return weightToPrioMap.lastEntry().getValue();

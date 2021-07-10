@@ -25,7 +25,6 @@ import com.graphhopper.routing.util.TraversalMode;
 import com.graphhopper.routing.weighting.WeightApproximator;
 import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.storage.Graph;
-import com.graphhopper.storage.SPTEntry;
 import com.graphhopper.util.EdgeIterator;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.GHUtility;
@@ -80,6 +79,8 @@ public class AlternativeRoute implements RoutingAlgorithm {
     private WeightApproximator weightApproximator;
 
     public AlternativeRoute(Graph graph, Weighting weighting, TraversalMode traversalMode) {
+        if (weighting.hasTurnCosts() && !traversalMode.isEdgeBased())
+            throw new IllegalStateException("Weightings supporting turn costs cannot be used with node-based traversal mode");
         this.graph = graph;
         this.weighting = weighting;
         this.traversalMode = traversalMode;
@@ -419,7 +420,7 @@ public class AlternativeRoute implements RoutingAlgorithm {
 
                         // plateaus.add(new PlateauInfo(altName, plateauEdges));
                         if (sortBy < worstSortBy || alternatives.size() < maxPaths) {
-                            Path path = BidirPathExtractor.extractPath(graph, weighting, fromSPTEntry, toSPTEntry, weight);
+                            Path path = DefaultBidirPathExtractor.extractPath(graph, weighting, fromSPTEntry, toSPTEntry, weight);
 
                             // for now do not add alternatives to set, if we do we need to remove then on alternatives.clear too (see below)
                             // AtomicInteger tid = addToMap(traversalIDMap, path);
@@ -522,7 +523,7 @@ public class AlternativeRoute implements RoutingAlgorithm {
                 int tid = traversalMode.createTraversalId(iterState, false);
                 set.add(tid);
                 if (startTID.get() < 0) {
-                    // for node based traversal we need to explicitely add base node as starting node and to list
+                    // for node based traversal we need to explicitly add base node as starting node and to list
                     if (!traversalMode.isEdgeBased()) {
                         tid = iterState.getBaseNode();
                         set.add(tid);

@@ -18,10 +18,7 @@
 package com.graphhopper.routing;
 
 import com.graphhopper.storage.NodeAccess;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.Helper;
-import com.graphhopper.util.Instruction;
-import com.graphhopper.util.PointList;
+import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.GHPoint;
 
 /**
@@ -30,8 +27,8 @@ import com.graphhopper.util.shapes.GHPoint;
 class InstructionsHelper {
 
     static double calculateOrientationDelta(double prevLatitude, double prevLongitude, double latitude, double longitude, double prevOrientation) {
-        double orientation = Helper.ANGLE_CALC.calcOrientation(prevLatitude, prevLongitude, latitude, longitude, false);
-        orientation = Helper.ANGLE_CALC.alignOrientation(prevOrientation, orientation);
+        double orientation = AngleCalc.ANGLE_CALC.calcOrientation(prevLatitude, prevLongitude, latitude, longitude, false);
+        orientation = AngleCalc.ANGLE_CALC.alignOrientation(prevOrientation, orientation);
         return orientation - prevOrientation;
     }
 
@@ -78,13 +75,13 @@ class InstructionsHelper {
     static GHPoint getPointForOrientationCalculation(EdgeIteratorState edgeIteratorState, NodeAccess nodeAccess) {
         double tmpLat;
         double tmpLon;
-        PointList tmpWayGeo = edgeIteratorState.fetchWayGeometry(3);
-        if (tmpWayGeo.getSize() <= 2) {
-            tmpLat = nodeAccess.getLatitude(edgeIteratorState.getAdjNode());
-            tmpLon = nodeAccess.getLongitude(edgeIteratorState.getAdjNode());
+        PointList tmpWayGeo = edgeIteratorState.fetchWayGeometry(FetchMode.ALL);
+        if (tmpWayGeo.size() <= 2) {
+            tmpLat = nodeAccess.getLat(edgeIteratorState.getAdjNode());
+            tmpLon = nodeAccess.getLon(edgeIteratorState.getAdjNode());
         } else {
-            tmpLat = tmpWayGeo.getLatitude(1);
-            tmpLon = tmpWayGeo.getLongitude(1);
+            tmpLat = tmpWayGeo.getLat(1);
+            tmpLon = tmpWayGeo.getLon(1);
         }
         return new GHPoint(tmpLat, tmpLon);
     }
